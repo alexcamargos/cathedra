@@ -51,4 +51,5 @@ mypy_path = "src"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+python_files = ["test_*.py", "*_test.py", "conftest.py"]
 addopts = "-ra -q"
