@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         default=None,
         description="Explicit filesystem path to the structured syllabus JSON file.",
     )
+    llm_backend: str = Field(
+        default="gemini",
+        description="LLM execution backend ('gemini' for REST API or 'agy' for CLI).",
+    )
     llm_provider: str = Field(
         default="gemini",
         description="Name of the active LLM provider.",
@@ -163,3 +167,6 @@ def get_settings() -> Settings:
         pydantic.ValidationError: If environment variables contain invalid configuration.
     """
     return Settings()
+
+
+__all__ = ["Settings", "get_settings"]
