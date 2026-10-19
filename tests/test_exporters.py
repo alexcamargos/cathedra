@@ -1,0 +1,515 @@
+"""Unit tests for the idempotent Obsidian exporter module (obsidian_writer.py).
+
+Validates generation and idempotent updates for discipline indices (_Indice_Materia.md),
+lesson wiki pages (Aula_NN_slug.md), Zettelkasten atomic notes, and factual audit JSON reports.
+"""
+
+import json
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from mba_wiki.exporters.obsidian_writer import (
+    VaultExportResult,
+    export_lesson_to_vault,
+    format_zettels_section,
+    write_atomic_zettel,
+    write_audit_report,
+    write_discipline_index,
+    write_lesson_page,
+)
+from mba_wiki.schemas import (
+    AtomicZettel,
+    ClaimAuditItem,
+    LessonAuditReport,
+    SyllabusModule,
+    WikiLessonOutput,
+)
+
+
+@pytest.fixture
+def sample_syllabus() -> SyllabusModule:
+    """Fixture providing a standard SyllabusModule instance.
+
+    Args:
+        None.
+
+    Returns:
+        Populated SyllabusModule instance.
+
+    Raises:
+        None.
+    """
+    return SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        professor="Prof. Dr. Roberto Albuquerque",
+        syllabus_summary="Análise de decisões de investimento e financiamento.",
+        topics=["VPL", "TIR", "Custo de Capital"],
+        bibliography=[
+            "Brealey, Myers & Allen. Princípios de Finanças Corporativas.",
+            "Damodaran, Aswath. Finanças Corporativas Aplicadas.",
+        ],
+    )
+
+
+@pytest.fixture
+def sample_lesson_output() -> WikiLessonOutput:
+    """Fixture providing a sample WikiLessonOutput instance.
+
+    Args:
+        None.
+
+    Returns:
+        Populated WikiLessonOutput instance.
+
+    Raises:
+        None.
+    """
+    zettel = AtomicZettel(
+        slug="valor-presente-liquido",
+        title="Valor Presente Líquido (VPL)",
+        domain_tags=["financas", "orcamento-capital"],
+        content_markdown=(
+            "O VPL representa a riqueza econômica gerada pelo projeto a valor presente."
+        ),
+        related_links=["taxa-interna-retorno", "taxa-minima-atratividade"],
+    )
+    claim = ClaimAuditItem(
+        claim_id="CLM-001",
+        quote="O VPL desconta fluxos futuros à taxa mínima de atratividade.",
+        category="technical",
+        verdict="verified",
+        severity=None,
+        evidence_source="Slide 12",
+        proposed_fix=None,
+    )
+    return WikiLessonOutput(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        lesson_number=1,
+        lesson_title="Critérios de Decisão de Investimento",
+        lesson_slug="criterios-decisao",
+        processed_date=date(2026, 10, 18),
+        source_slide_filename="aula_01_financas.pdf",
+        fact_check_passed=True,
+        removed_unsupported_claims=0,
+        body_markdown=(
+            "# Critérios de Decisão de Investimento\n\n"
+            "A análise de investimentos corporativos fundamenta-se no desconto dos fluxos de caixa."
+        ),
+        extracted_zettels=[zettel],
+        audit_items=[claim],
+    )
+
+
+def test_write_discipline_index_creates_new_file(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_discipline_index generates _Indice_Materia.md with correct templates.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    index_path = write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=sample_lesson_output,
+    )
+
+    assert index_path.is_file()
+    content = index_path.read_text(encoding="utf-8")
+    assert "type: moc_disciplina" in content
+    assert 'discipline_slug: "financas-corporativas"' in content
+    assert 'discipline_name: "Finanças Corporativas"' in content
+    assert "<!-- AUTO-LESSONS:START -->" in content
+    assert "<!-- AUTO-LESSONS:END -->" in content
+    expected_link = "- [[Aula_01_criterios-decisao|Aula 01: Critérios de Decisão de Investimento]]"
+    assert expected_link in content
+    assert "Brealey, Myers & Allen" in content
+
+
+def test_write_discipline_index_idempotent_no_duplicates(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that re-running write_discipline_index does not duplicate links or overwrite notes.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    # 1. Initial write
+    index_path = write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=sample_lesson_output,
+    )
+
+    # 2. User appends manual notes outside of delimiters
+    manual_note = "\n\n## Anotações do Aluno\n- Revisar cálculo de WACC antes da P1."
+    index_path.write_text(index_path.read_text(encoding="utf-8") + manual_note, encoding="utf-8")
+
+    # 3. Reprocess the same lesson
+    updated_path = write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=sample_lesson_output,
+    )
+
+    content = updated_path.read_text(encoding="utf-8")
+    expected_link = "- [[Aula_01_criterios-decisao|Aula 01: Critérios de Decisão de Investimento]]"
+    assert content.count(expected_link) == 1
+    assert "## Anotações do Aluno" in content
+    assert "Revisar cálculo de WACC antes da P1." in content
+
+
+def test_write_discipline_index_orders_multiple_lessons(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that multiple lessons added to index are ordered numerically by lesson number.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=sample_lesson_output,
+    )
+
+    lesson_2 = sample_lesson_output.model_copy(
+        update={
+            "lesson_number": 2,
+            "lesson_title": "Taxa Interna de Retorno",
+            "lesson_slug": "taxa-interna-retorno",
+        }
+    )
+    index_path = write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=lesson_2,
+    )
+
+    content = index_path.read_text(encoding="utf-8")
+    idx_1 = content.find("Aula_01_criterios-decisao")
+    idx_2 = content.find("Aula_02_taxa-interna-retorno")
+    assert idx_1 != -1 and idx_2 != -1
+    assert idx_1 < idx_2
+
+
+def test_write_lesson_page_creates_and_preserves_personal_notes(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_lesson_page creates lesson wiki page and preserves manual notes on rerun.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    # 1. Create fresh lesson page
+    lesson_path = write_lesson_page(vault_root=tmp_path, output=sample_lesson_output)
+    assert lesson_path.is_file()
+    assert lesson_path.name == "Aula_01_criterios-decisao.md"
+
+    content = lesson_path.read_text(encoding="utf-8")
+    assert "type: wiki_aula" in content
+    assert "<!-- AUTO-CONTENT:START -->" in content
+    assert "<!-- AUTO-CONTENT:END -->" in content
+    assert "- [[valor-presente-liquido|Valor Presente Líquido (VPL)]]" in content
+    assert "## Notas Pessoais de Aula" in content
+
+    # 2. Add manual notes in personal section
+    manual_content = content + "\n- Anotação pessoal do aluno feita em sala.\n"
+    lesson_path.write_text(manual_content, encoding="utf-8")
+
+    # 3. Update lesson with new body and reprocess
+    updated_output = sample_lesson_output.model_copy(
+        update={
+            "body_markdown": "# Texto Atualizado e Expandido\nNovo parágrafo didático.",
+            "removed_unsupported_claims": 2,
+        }
+    )
+    reprocessed_path = write_lesson_page(vault_root=tmp_path, output=updated_output)
+    reprocessed_content = reprocessed_path.read_text(encoding="utf-8")
+
+    assert "# Texto Atualizado e Expandido" in reprocessed_content
+    assert "removed_claims: 2" in reprocessed_content
+    assert "Anotação pessoal do aluno feita em sala." in reprocessed_content
+
+
+def test_write_atomic_zettel_creates_and_updates_idempotently(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_atomic_zettel writes Zettel notes, merges tags, and avoids duplicate links.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = sample_lesson_output.extracted_zettels[0]
+
+    # 1. First write from Lesson 1
+    zettel_path = write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel,
+        output=sample_lesson_output,
+    )
+    assert zettel_path.is_file()
+    assert zettel_path.name == "valor-presente-liquido.md"
+
+    initial_content = zettel_path.read_text(encoding="utf-8")
+    assert "type: zettel" in initial_content
+    assert 'slug: "valor-presente-liquido"' in initial_content
+    assert "- [[taxa-interna-retorno]]" in initial_content
+    assert "<!-- AUTO-BACKLINKS:START -->" in initial_content
+    assert "- [[Aula_01_criterios-decisao]] (Finanças Corporativas)" in initial_content
+
+    # 2. Reprocess same lesson - verify no duplicate backlinks
+    write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel,
+        output=sample_lesson_output,
+    )
+    reprocessed_content = zettel_path.read_text(encoding="utf-8")
+    assert reprocessed_content.count("- [[Aula_01_criterios-decisao]] (Finanças Corporativas)") == 1
+
+    # 3. Reference from Lesson 2 with an additional domain tag
+    zettel_updated_tags = zettel.model_copy(
+        update={"domain_tags": ["financas", "gestao-estrategica"]}
+    )
+    lesson_2 = sample_lesson_output.model_copy(
+        update={
+            "lesson_number": 2,
+            "lesson_title": "Taxa Interna de Retorno",
+            "lesson_slug": "taxa-interna-retorno",
+        }
+    )
+    write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel_updated_tags,
+        output=lesson_2,
+    )
+    multi_lesson_content = zettel_path.read_text(encoding="utf-8")
+    assert "- [[Aula_01_criterios-decisao]] (Finanças Corporativas)" in multi_lesson_content
+    assert "- [[Aula_02_taxa-interna-retorno]] (Finanças Corporativas)" in multi_lesson_content
+    assert "gestao-estrategica" in multi_lesson_content
+    assert "orcamento-capital" in multi_lesson_content
+
+
+def test_write_audit_report_persists_valid_json(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_audit_report generates a validated JSON file in 03_Auditoria_Factual.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    report_path = write_audit_report(vault_root=tmp_path, output=sample_lesson_output)
+    assert report_path.is_file()
+    assert report_path.name == "financas-corporativas_Aula_01_audit.json"
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    report = LessonAuditReport.model_validate(data)
+    assert report.discipline_slug == "financas-corporativas"
+    assert report.lesson_number == 1
+    assert report.fact_check_passed is True
+    assert report.total_claims_audited == 1
+    assert len(report.audit_items) == 1
+    assert report.audit_items[0].claim_id == "CLM-001"
+
+
+def test_export_lesson_to_vault_coordinates_all_files(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that export_lesson_to_vault exports all artifacts and remains fully idempotent.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    result = export_lesson_to_vault(
+        vault_root=tmp_path,
+        output=sample_lesson_output,
+        syllabus=sample_syllabus,
+    )
+
+    assert isinstance(result, VaultExportResult)
+    assert result.lesson_path.is_file()
+    assert result.index_path.is_file()
+    assert len(result.zettel_paths) == 1
+    assert result.audit_report_path.is_file()
+
+    # Second run to prove idempotency across entire bundle
+    second_result = export_lesson_to_vault(
+        vault_root=tmp_path,
+        output=sample_lesson_output,
+        syllabus=sample_syllabus,
+    )
+    assert second_result.lesson_path == result.lesson_path
+    assert second_result.index_path == result.index_path
+
+    # Verify index links are not duplicated
+    index_text = result.index_path.read_text(encoding="utf-8")
+    expected_link = "- [[Aula_01_criterios-decisao|Aula 01: Critérios de Decisão de Investimento]]"
+    assert index_text.count(expected_link) == 1
+
+
+def test_format_zettels_section_empty() -> None:
+    """Tests that format_zettels_section returns an empty string when zettels list is empty.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    assert format_zettels_section([]) == ""
+
+
+def test_write_discipline_index_missing_delimiters_raises(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_discipline_index raises ValueError if delimiters are corrupted or missing.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    discipline_dir = tmp_path / "01_Wiki_Disciplinas" / sample_syllabus.discipline_slug
+    discipline_dir.mkdir(parents=True, exist_ok=True)
+    index_path = discipline_dir / "_Indice_Materia.md"
+    index_path.write_text("Arquivo sem delimitadores de auto-lessons.", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Delimiters .* not found"):
+        write_discipline_index(
+            vault_root=tmp_path,
+            syllabus=sample_syllabus,
+            output=sample_lesson_output,
+        )
+
+
+def test_write_lesson_page_missing_delimiters_raises(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_lesson_page raises ValueError if AUTO-CONTENT delimiters are missing.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    discipline_dir = tmp_path / "01_Wiki_Disciplinas" / sample_lesson_output.discipline_slug
+    discipline_dir.mkdir(parents=True, exist_ok=True)
+    lesson_path = (
+        discipline_dir
+        / f"Aula_{sample_lesson_output.lesson_number:02d}_{sample_lesson_output.lesson_slug}.md"
+    )
+    lesson_path.write_text("Arquivo corrompido sem tags auto-content.", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Delimiters .* not found"):
+        write_lesson_page(vault_root=tmp_path, output=sample_lesson_output)
+
+
+def test_write_atomic_zettel_missing_delimiters_raises(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_atomic_zettel raises ValueError if AUTO-BACKLINKS delimiters are missing.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = sample_lesson_output.extracted_zettels[0]
+    zettel_dir = tmp_path / "02_Zettelkasten"
+    zettel_dir.mkdir(parents=True, exist_ok=True)
+    zettel_path = zettel_dir / f"{zettel.slug}.md"
+    zettel_path.write_text("Arquivo de zettel sem tags delimitadoras.", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Delimiters .* not found"):
+        write_atomic_zettel(vault_root=tmp_path, zettel=zettel, output=sample_lesson_output)
