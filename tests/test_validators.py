@@ -1,0 +1,328 @@
+"""Unit tests for the deterministic prose linter (validators.py).
+
+Tests enforcement of typographic, punctuation, structural, and lexical blacklist
+rules specified in docs/LINTER_RULES.md.
+"""
+
+from mba_wiki.agents.validators import (
+    LinterViolation,
+    ValidationResult,
+    mask_ignored_elements,
+    validate_markdown_prose,
+)
+
+
+def test_clean_academic_prose_passes() -> None:
+    """Tests that clean, professional academic prose passes validation with zero violations.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    clean_text = (
+        "O método do Valor Presente Líquido considera o valor do dinheiro no tempo. "
+        "Ele desconta fluxos de caixa futuros utilizando o custo de oportunidade do capital. "
+        "Dessa forma, projetos com resultado positivo geram acréscimo patrimonial.\n\n"
+        "Em contrapartida, a Taxa Interna de Retorno apresenta limitações teóricas. "
+        "A suposição de reinvestimento dos fluxos à própria taxa interna distorce a análise. "
+        "Por essa razão, gestores financeiros priorizam o critério do VPL na tomada de decisão."
+    )
+    result = validate_markdown_prose(clean_text)
+    assert result.is_valid is True
+    assert len(result.violations) == 0
+
+
+def test_bad_ai_prose_fixture_fails(bad_ai_prose_text: str) -> None:
+    """Tests that the bad_ai_prose.md fixture triggers violations across all rule families.
+
+    Args:
+        bad_ai_prose_text: Text loaded from tests/fixtures/bad_ai_prose.md.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    result = validate_markdown_prose(bad_ai_prose_text)
+    assert result.is_valid is False
+    assert len(result.violations) > 0
+
+    rule_ids = {v.rule_id for v in result.violations}
+
+    # Verify mechanical rules R1 to R4 are triggered
+    assert "R1_DASH" in rule_ids
+    assert "R2_SYMBOL" in rule_ids
+    assert "R3_PARAGRAPH_LENGTH" in rule_ids
+    assert "R4_AI_BULLET" in rule_ids
+
+    # Verify lexical blacklist groups L1 to L7 are triggered
+    assert "L1_AI_OPENER" in rule_ids
+    assert "L2_EMPTY_APHORISM" in rule_ids
+    assert "L3_METAPHOR" in rule_ids
+    assert "L4_HISTRIONIC_ADJECTIVE" in rule_ids
+    assert "L5_STIFF_CONNECTIVE" in rule_ids
+    assert "L6_AI_CLOSING" in rule_ids
+    assert "L7_ASSISTANT_RESIDUE" in rule_ids
+
+
+def test_r1_prohibited_dashes() -> None:
+    """Tests that em-dashes and en-dashes are rejected while standard hyphens are allowed.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    em_dash_text = "O investimento em capital de giro — embora necessário — reduz a liquidez."
+    result_em = validate_markdown_prose(em_dash_text)
+    assert result_em.is_valid is False
+    assert any(v.rule_id == "R1_DASH" for v in result_em.violations)
+
+    en_dash_text = "O investimento em capital de giro – embora necessário – reduz a liquidez."
+    result_en = validate_markdown_prose(en_dash_text)
+    assert result_en.is_valid is False
+    assert any(v.rule_id == "R1_DASH" for v in result_en.violations)
+
+    # Standard hyphen for compound words should be accepted
+    hyphen_text = "O curso de pós-graduação analisa a relação custo-benefício de novos projetos."
+    result_hyphen = validate_markdown_prose(hyphen_text)
+    assert not any(v.rule_id == "R1_DASH" for v in result_hyphen.violations)
+
+
+def test_r2_decorative_symbols_and_emojis() -> None:
+    """Tests that decorative arrows and Unicode emojis are flagged as violations.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    arrow_text = "A expansão de receitas → aumento de margens → maiores lucros."
+    result_arrow = validate_markdown_prose(arrow_text)
+    assert any(v.rule_id == "R2_SYMBOL" for v in result_arrow.violations)
+
+    emoji_text = "O projeto foi aprovado pelo comitê executivo com sucesso 🚀."
+    result_emoji = validate_markdown_prose(emoji_text)
+    assert any(v.rule_id == "R2_SYMBOL" for v in result_emoji.violations)
+
+
+def test_r3_paragraph_sentence_limit() -> None:
+    """Tests that paragraphs exceeding 4 sentences trigger R3_PARAGRAPH_LENGTH.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    # 5 sentences paragraph should fail
+    five_sentences = (
+        "Primeira frase do parágrafo explicativo. "
+        "Segunda frase trazendo contexto adicional. "
+        "Terceira frase aprofundando o modelo numérico. "
+        "Quarta frase estabelecendo a correlação observada. "
+        "Quinta frase excedendo o limite permitido pelo linter."
+    )
+    result_fail = validate_markdown_prose(five_sentences)
+    assert any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in result_fail.violations)
+
+    # 4 sentences paragraph should pass
+    four_sentences = (
+        "Primeira frase do parágrafo explicativo. "
+        "Segunda frase trazendo contexto adicional. "
+        "Terceira frase aprofundando o modelo numérico. "
+        "Quarta frase estabelecendo a correlação observada."
+    )
+    result_pass = validate_markdown_prose(four_sentences)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in result_pass.violations)
+
+
+def test_r3_ignores_abbreviations_and_decimals() -> None:
+    """Tests that common abbreviations and decimals do not cause false sentence counts.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    abbreviation_text = (
+        "O Prof. Roberto Albuquerque apresentou o modelo econômico às 14h. "
+        "O Dr. Silva e sua equipe, i.e., os analistas seniores, avaliaram a taxa de 12.5%. "
+        "Segundo Brealey et al., o retorno esperado deve superar a taxa Selic. "
+        "A análise comparativa de VPL vs. TIR comprovou a viabilidade do investimento."
+    )
+    result = validate_markdown_prose(abbreviation_text)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in result.violations)
+
+
+def test_r4_ai_mechanical_bullet_patterns() -> None:
+    """Tests detection of AI-style mechanical bullet points with bold prefixes.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    bullet_prose = (
+        "Os principais indicadores de retorno são:\n"
+        "- **VPL:** mensura o ganho em termos absolutos de valor.\n"
+        "- **TIR:** reflete a rentabilidade percentual intrínseca do projeto."
+    )
+    result = validate_markdown_prose(bullet_prose)
+    assert any(v.rule_id == "R4_AI_BULLET" for v in result.violations)
+
+
+def test_lexical_blacklist_individual_groups() -> None:
+    """Tests that each lexical blacklist category L1-L7 triggers its specific rule ID.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    # L1: AI opener
+    res_l1 = validate_markdown_prose("No cenário atual, a liquidez é essencial.")
+    assert any(v.rule_id == "L1_AI_OPENER" for v in res_l1.violations)
+
+    # L2: Empty aphorism
+    res_l2 = validate_markdown_prose("No seu cerne, o problema decorre do endividamento.")
+    assert any(v.rule_id == "L2_EMPTY_APHORISM" for v in res_l2.violations)
+
+    # L3: Metaphor / Figured verb
+    res_l3 = validate_markdown_prose("Precisamos alavancar os recursos para obter lucro.")
+    assert any(v.rule_id == "L3_METAPHOR" for v in res_l3.violations)
+
+    # L4: Histrionic adjective
+    res_l4 = validate_markdown_prose("Este resultado é crucial para a sobrevivência da firma.")
+    assert any(v.rule_id == "L4_HISTRIONIC_ADJECTIVE" for v in res_l4.violations)
+
+    # L5: Stiff connective
+    res_l5 = validate_markdown_prose("Ademais, os custos operacionais continuam elevados.")
+    assert any(v.rule_id == "L5_STIFF_CONNECTIVE" for v in res_l5.violations)
+
+    # L6: AI closing
+    res_l6 = validate_markdown_prose("Em suma, a tomada de decisão deve ser fundamentada.")
+    assert any(v.rule_id == "L6_AI_CLOSING" for v in res_l6.violations)
+
+    # L7: Assistant residue
+    res_l7 = validate_markdown_prose("Como uma IA, não posso fornecer recomendação de compra.")
+    assert any(v.rule_id == "L7_ASSISTANT_RESIDUE" for v in res_l7.violations)
+
+
+def test_masking_code_blocks_and_latex_equations() -> None:
+    """Tests that code blocks, inline code, LaTeX math, and HTML comments are masked.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    text_with_technical_artifacts = (
+        "Considere a fórmula a seguir para cálculo do indicador:\n\n"
+        "$$\n"
+        "\\text{VPL} = \\sum_{t=1}^n \\frac{FC_t}{(1 + r)^t} - I_0\n"
+        "$$\n\n"
+        "Onde $r$ é a taxa de desconto e `delta_t` representa o período. "
+        "Consulte o script abaixo:\n\n"
+        "```python\n"
+        "# Comentário contendo — travessão e palavra crucial ou ademais\n"
+        "def compute_npv(rate: float) -> float: ...\n"
+        "```\n\n"
+        "<!-- Comentário HTML com seta → e emoji 🚀 -->\n"
+        "A aplicação prática demonstrou resultados consistentes."
+    )
+    result = validate_markdown_prose(text_with_technical_artifacts)
+    assert result.is_valid is True
+    assert len(result.violations) == 0
+
+
+def test_mask_ignored_elements_function() -> None:
+    """Tests that mask_ignored_elements preserves line count while blanking syntax.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw = (
+        "Linha 1\n"
+        "```python\n"
+        "bloco de codigo\n"
+        "```\n"
+        "Linha 5 com `codigo inline` e $$display math$$\n"
+        "<!-- Comentario -->\n"
+        "Linha 7"
+    )
+    masked = mask_ignored_elements(raw)
+    assert raw.count("\n") == masked.count("\n")
+    assert "bloco de codigo" not in masked
+    assert "codigo inline" not in masked
+    assert "display math" not in masked
+    assert "Comentario" not in masked
+    assert "Linha 1" in masked
+    assert "Linha 7" in masked
+
+
+def test_validation_result_and_violation_dataclasses() -> None:
+    """Tests instantiation and attributes of ValidationResult and LinterViolation.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    violation = LinterViolation(
+        rule_id="R1_DASH",
+        message="Travessão proibido",
+        line_number=10,
+        matched_text="—",
+    )
+    assert violation.rule_id == "R1_DASH"
+    assert violation.message == "Travessão proibido"
+    assert violation.line_number == 10
+    assert violation.matched_text == "—"
+
+    result = ValidationResult(is_valid=False, violations=[violation])
+    assert result.is_valid is False
+    assert len(result.violations) == 1
