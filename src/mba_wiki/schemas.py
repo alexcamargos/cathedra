@@ -80,6 +80,46 @@ class ClaimAuditItem(BaseModel):
     proposed_fix: str | None = None
 
 
+class AuditClaimsResponse(BaseModel):
+    """Schema representing the collection of audited factual statements from the LLM.
+
+    Attributes:
+        claims: List of individual factual statements analyzed with verdicts and severities.
+    """
+
+    claims: list[ClaimAuditItem] = Field(default_factory=list)
+
+
+class FactCheckResult(BaseModel):
+    """Schema representing the consolidated factual audit outcome and text remediation.
+
+    Attributes:
+        audit_items: Complete record of all individual claims audited.
+        fact_check_passed: Boolean indicating whether factual auditing passed without blockers.
+        removed_unsupported_claims: Total count of ungrounded statements pruned from the text.
+        audited_markdown: The final sanitized and remediated draft prose.
+    """
+
+    audit_items: list[ClaimAuditItem] = Field(default_factory=list)
+    fact_check_passed: bool
+    removed_unsupported_claims: int = 0
+    audited_markdown: str
+
+
+class HumanizerResult(BaseModel):
+    """Schema representing the outcome of stylistic rewriting and validation.
+
+    Attributes:
+        humanized_text: Stylistically polished prose text adhering to linter rules.
+        retry_count: Total number of generation and remediation attempts made.
+        is_valid: Boolean indicating whether deterministic linter validation passed.
+    """
+
+    humanized_text: str
+    retry_count: int
+    is_valid: bool
+
+
 class AtomicZettel(BaseModel):
     """Schema representing an atomic conceptual note destined for the Zettelkasten.
 
@@ -96,6 +136,18 @@ class AtomicZettel(BaseModel):
     domain_tags: list[str]
     content_markdown: str
     related_links: list[str]
+
+
+class DraftResult(BaseModel):
+    """Schema representing the preliminary draft and candidate atomic zettels.
+
+    Attributes:
+        raw_draft: Preliminary expanded lesson chapter text in Markdown.
+        extracted_zettels: Candidate universal concepts identified for the Zettelkasten.
+    """
+
+    raw_draft: str
+    extracted_zettels: list[AtomicZettel] = Field(default_factory=list)
 
 
 class WikiLessonOutput(BaseModel):
@@ -200,7 +252,11 @@ class LessonPipelineState(BaseModel):
 
 __all__ = [
     "AtomicZettel",
+    "AuditClaimsResponse",
     "ClaimAuditItem",
+    "DraftResult",
+    "FactCheckResult",
+    "HumanizerResult",
     "LessonAuditReport",
     "LessonPipelineState",
     "SlideChunk",
