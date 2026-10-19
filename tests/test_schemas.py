@@ -11,7 +11,11 @@ from pydantic import ValidationError
 
 from mba_wiki.schemas import (
     AtomicZettel,
+    AuditClaimsResponse,
     ClaimAuditItem,
+    DraftResult,
+    FactCheckResult,
+    HumanizerResult,
     LessonAuditReport,
     LessonPipelineState,
     SlideChunk,
@@ -439,3 +443,109 @@ def test_lesson_pipeline_state_valid_and_defaults() -> None:
     assert state.humanized_markdown is None
     assert state.humanizer_retry_count == 0
     assert state.output is None
+
+
+def test_draft_result_valid_and_defaults() -> None:
+    """Tests successful instantiation, defaults, and validation of DraftResult.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    draft = DraftResult(raw_draft="Capítulo explicativo da aula.")
+    assert draft.raw_draft == "Capítulo explicativo da aula."
+    assert draft.extracted_zettels == []
+
+    zettel = AtomicZettel(
+        slug="vpl",
+        title="VPL",
+        domain_tags=["financas"],
+        content_markdown="Nota conceitual de VPL.",
+        related_links=[],
+    )
+    draft_with_zettels = DraftResult(
+        raw_draft="Aula com links.",
+        extracted_zettels=[zettel],
+    )
+    assert len(draft_with_zettels.extracted_zettels) == 1
+
+    dumped = draft_with_zettels.model_dump()
+    restored = DraftResult.model_validate(dumped)
+    assert restored == draft_with_zettels
+
+    with pytest.raises(ValidationError):
+        DraftResult.model_validate({})
+
+
+def test_audit_claims_response_and_fact_check_result() -> None:
+    """Tests instantiation and defaults for AuditClaimsResponse and FactCheckResult.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    claim = ClaimAuditItem(
+        claim_id="c1",
+        quote="Trecho auditado.",
+        category="formula",
+        verdict="verified",
+    )
+    response = AuditClaimsResponse(claims=[claim])
+    assert len(response.claims) == 1
+    assert response.claims[0].claim_id == "c1"
+
+    empty_response = AuditClaimsResponse()
+    assert empty_response.claims == []
+
+    result = FactCheckResult(
+        audit_items=[claim],
+        fact_check_passed=True,
+        removed_unsupported_claims=0,
+        audited_markdown="Texto limpo e aprovado.",
+    )
+    assert result.fact_check_passed is True
+    assert result.removed_unsupported_claims == 0
+    assert result.audited_markdown == "Texto limpo e aprovado."
+
+    dumped = result.model_dump()
+    restored = FactCheckResult.model_validate(dumped)
+    assert restored == result
+
+
+def test_humanizer_result_valid_and_defaults() -> None:
+    """Tests successful instantiation and validation of HumanizerResult.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    result = HumanizerResult(
+        humanized_text="Texto acadêmico polido.",
+        retry_count=2,
+        is_valid=True,
+    )
+    assert result.humanized_text == "Texto acadêmico polido."
+    assert result.retry_count == 2
+    assert result.is_valid is True
+
+    dumped = result.model_dump()
+    restored = HumanizerResult.model_validate(dumped)
+    assert restored == result
+
+    with pytest.raises(ValidationError):
+        HumanizerResult.model_validate({})
