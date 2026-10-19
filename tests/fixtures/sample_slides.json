@@ -1,0 +1,45 @@
+[
+  {
+    "slide_number": 1,
+    "title": "Finanças Corporativas: Critérios de Decisão de Investimento",
+    "raw_text": "Programa Executivo de Pós-Graduação\nAula 01: Métodos de Avaliação de Projetos de Capital\nProfessor: Dr. Roberto Albuquerque\nObjetivo: Compreender a mensuração de retorno e geração de valor econômico.",
+    "latex_equations": [],
+    "visual_descriptions": [
+      "Logotipo institucional da instituição de ensino no canto superior direito."
+    ]
+  },
+  {
+    "slide_number": 2,
+    "title": "Valor Presente Líquido (VPL)",
+    "raw_text": "O VPL quantifica o acréscimo de riqueza propiciado pela implementação do projeto de investimento ao descontar os fluxos futuros à taxa mínima de atratividade.\nRegra de Decisão:\nSe VPL > 0, o investimento adiciona valor e deve ser aceito.\nSe VPL < 0, o projeto consome valor e deve ser rejeitado.\nSe VPL = 0, a decisão é indiferente.",
+    "latex_equations": [
+      "\\text{VPL} = \\sum_{t=1}^{n} \\frac{FC_t}{(1 + r)^t} - I_0"
+    ],
+    "visual_descriptions": [
+      "Diagrama de fluxo de caixa com investimento inicial I_0 negativo em t=0 e fluxos positivos de t=1 a t=n."
+    ]
+  },
+  {
+    "slide_number": 3,
+    "title": "Taxa Interna de Retorno (TIR) e Custo de Capital",
+    "raw_text": "A TIR corresponde à taxa de desconto que iguala o VPL a zero. Representa a taxa intrínseca de rentabilidade do investimento.\nLimitações:\nSuposição de reinvestimento à própria TIR.\nConflito com o VPL em projetos mutuamente excludentes com escalas distintas.",
+    "latex_equations": [
+      "\\sum_{t=0}^{n} \\frac{FC_t}{(1 + \\text{TIR})^t} = 0"
+    ],
+    "visual_descriptions": [
+      "Curva do perfil do VPL em função da taxa de desconto ilustrando a interseção com o eixo horizontal no ponto da TIR."
+    ]
+  },
+  {
+    "slide_number": 4,
+    "title": "Custo Médio Ponderado de Capital (WACC)",
+    "raw_text": "O WACC reflete o custo conjunto dos recursos financeiros utilizados pela companhia, considerando capital próprio e dívida após o benefício fiscal dos juros.",
+    "latex_equations": [
+      "\\text{WACC} = \\left( \\frac{E}{V} \\right) K_e + \\left( \\frac{D}{V} \\right) K_d (1 - T)",
+      "K_e = R_f + \\beta (R_m - R_f)"
+    ],
+    "visual_descriptions": [
+      "Gráfico ilustrando a estrutura de capital dividida entre patrimônio líquido (E) e passivo oneroso (D)."
+    ]
+  }
+]

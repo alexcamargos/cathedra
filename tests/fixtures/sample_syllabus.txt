@@ -1,0 +1,25 @@
+PROGRAMA DO CURSO: MBA EM GESTÃO ESTRATÉGICA E MERCADO FINANCEIRO
+
+DISCIPLINA: Finanças Corporativas e Análise de Valor
+CÓDIGO / SLUG: financas-corporativas
+PROFESSOR: Prof. Dr. Roberto Albuquerque
+
+EMENTA E OBJETIVOS:
+A disciplina aborda a dinâmica das decisões financeiras de longo prazo no ambiente corporativo, enfatizando critérios de avaliação econômica de projetos de investimento sob condições de risco e incerteza. Examina a determinação da estrutura ótima de capital, modelos de precificação de ativos e a metodologia de avaliação de empresas por fluxo de caixa descontado, capacitando o aluno a mensurar e maximizar o valor econômico adicionado para os acionistas.
+
+CONTEÚDO PROGRAMÁTICO:
+1. Fundamentos da Criação de Valor e Valor do Dinheiro no Tempo
+2. Métodos de Avaliação de Projetos: VPL, TIR, IL e Payback Descontado
+3. Risco, Retorno e Custo de Oportunidade do Capital Próprio via CAPM
+4. Custo Médio Ponderado de Capital (WACC) e Benefício Fiscal da Dívida
+5. Estrutura de Capital: Teorema de Modigliani-Miller e Teoria do Trade-off
+6. Valuation de Empresas: Modelo de Fluxo de Caixa Descontado (FCD) e Múltiplos
+
+BIBLIOGRAFIA BÁSICA:
+- BREALEY, Richard A.; MYERS, Stewart C.; ALLEN, Franklin. Princípios de Finanças Corporativas. 12. ed. Porto Alegre: AMGH, 2018.
+- DAMODARAN, Aswath. Valuation: Como Avaliar Empresas e Escolher as Melhores Ações. 3. ed. Rio de Janeiro: LTC, 2012.
+- ROSS, Stephen A.; WESTERFIELD, Randolph W.; JAFFE, Jeffrey. Administração Financeira: Corporate Finance. 10. ed. São Paulo: Atlas, 2015.
+
+BIBLIOGRAFIA COMPLEMENTAR:
+- COPELAND, Tom; KOLLER, Tim; MURRIN, Jack. Avaliação de Empresas (Valuation): Calculando e Gerenciando o Valor das Empresas. 3. ed. São Paulo: Makron Books, 2002.
+- BERK, Jonathan; DeMARZO, Peter. Finanças Empresariais. 2. ed. Porto Alegre: Bookman, 2013.
