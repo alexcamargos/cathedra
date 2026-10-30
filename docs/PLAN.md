@@ -75,3 +75,28 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Implementar `src/mba_wiki/cli.py` com comandos `init-syllabus <arquivo>` e `build-lesson <slide_path> --discipline <slug> --lesson <numero>`.
 - **Arquivos afetados:** `src/mba_wiki/cli.py`, `tests/test_cli.py`.
 - **Criterio de aceite:** Execucao via `CliRunner` passando em `pytest`, `ruff` e `mypy`.
+
+
+## Etapa 13: Contratos de dados para conexoes transversais e diario de tensoes
+- **Status:** `[x]`
+- **Escopo:** Implementar os modelos `CrossDisciplineLink` e `DialecticalTension` em `src/mba_wiki/schemas.py`, estendendo `DraftResult`, `WikiLessonOutput` e `LessonPipelineState` com colecoes default_factory=list para assegurar retrocompatibilidade.
+- **Arquivos afetados:** `src/mba_wiki/schemas.py`, `tests/test_schemas.py`.
+- **Criterio de aceite:** Testes unitarios validando instanciacao, validacoes de campo, tipos literais e retrocompatibilidade com `uv run pytest tests/test_schemas.py`.
+
+## Etapa 14: Prompt do drafter e injecao curricular global de tensoes
+- **Status:** `[x]`
+- **Escopo:** Atualizar `src/mba_wiki/agents/prompts/drafter.md` e `src/mba_wiki/agents/drafter.py` para injetar contexto sumarizado de `StructuredSyllabus` e extrair conexoes transversais e tensoes dialeticas no `DraftResult`.
+- **Arquivos afetados:** `src/mba_wiki/agents/prompts/drafter.md`, `src/mba_wiki/agents/drafter.py`, `tests/test_drafter.py`.
+- **Criterio de aceite:** Testes unitarios com cliente LLM mockado validando preenchimento de `cross_links` e `detected_tensions`.
+
+## Etapa 15: Exportador idempotente para o diario de tensoes no Obsidian
+- **Status:** `[x]`
+- **Escopo:** Estender `src/mba_wiki/exporters/obsidian_writer.py` para gerar notas em `04_Diario_Tensoes/<tension_slug>.md` e o indice `04_Diario_Tensoes/_Indice_Tensoes.md`, garantindo acumulacao idempotente de evidencias entre aulas e preservacao de notas pessoais.
+- **Arquivos afetados:** `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_exporters.py`.
+- **Criterio de aceite:** Testes com `tmp_path` simulando duas aulas alimentando a mesma tensao sem duplicar entradas nem apagar anotacoes manuais.
+
+## Etapa 16: Orquestracao do grafo e comando CLI para consolidacao de tensoes
+- **Status:** `[x]`
+- **Escopo:** Integrar a passagem do `StructuredSyllabus` ao drafter em `src/mba_wiki/agents/graph.py` e persistencia de tensoes em `build-lesson`. Implementar o comando `sync-tensions` em `src/mba_wiki/cli.py` para reindexacao do Vault.
+- **Arquivos afetados:** `src/mba_wiki/agents/graph.py`, `src/mba_wiki/cli.py`, `tests/test_graph.py`, `tests/test_cli.py`.
+- **Criterio de aceite:** Pipeline ponta a ponta e testes de CLI passando em `pytest`, `ruff` e `mypy`.
