@@ -6,11 +6,12 @@ link duplication across re-runs.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mba_wiki.schemas import (
     AtomicZettel,
+    DialecticalTension,
     LessonAuditReport,
     SyllabusModule,
     WikiLessonOutput,
@@ -22,6 +23,27 @@ AUTO_CONTENT_START = "<!-- AUTO-CONTENT:START -->"
 AUTO_CONTENT_END = "<!-- AUTO-CONTENT:END -->"
 AUTO_BACKLINKS_START = "<!-- AUTO-BACKLINKS:START -->"
 AUTO_BACKLINKS_END = "<!-- AUTO-BACKLINKS:END -->"
+AUTO_TENSIONS_START = "<!-- AUTO-TENSIONS:START -->"
+AUTO_TENSIONS_END = "<!-- AUTO-TENSIONS:END -->"
+AUTO_EVIDENCES_START = "<!-- AUTO-EVIDENCES:START -->"
+AUTO_EVIDENCES_END = "<!-- AUTO-EVIDENCES:END -->"
+AUTO_ZETTELS_START = "<!-- AUTO-ZETTELS:START -->"
+AUTO_ZETTELS_END = "<!-- AUTO-ZETTELS:END -->"
+
+
+def escape_yaml_str(text: str) -> str:
+    """Escapes backslashes and double quotes for safe inclusion in YAML frontmatter.
+
+    Args:
+        text: Raw string value to escape.
+
+    Returns:
+        Escaped string safe for double-quoted YAML strings.
+
+    Raises:
+        None.
+    """
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 @dataclass
@@ -33,12 +55,16 @@ class VaultExportResult:
         index_path: Path to the discipline index MOC (_Indice_Materia.md).
         zettel_paths: List of paths to exported or updated atomic Zettelkasten notes.
         audit_report_path: Path to the saved factual audit JSON report.
+        tension_paths: List of paths to exported or updated dialectical tension notes.
+        tensions_index_path: Path to the tensions index MOC (_Indice_Tensoes.md), if exported.
     """
 
     lesson_path: Path
     index_path: Path
     zettel_paths: list[Path]
     audit_report_path: Path
+    tension_paths: list[Path] = field(default_factory=list)
+    tensions_index_path: Path | None = None
 
 
 def write_discipline_index(
@@ -76,9 +102,9 @@ def write_discipline_index(
         content = (
             "---\n"
             "type: moc_disciplina\n"
-            f'discipline_slug: "{syllabus.discipline_slug}"\n'
-            f'discipline_name: "{syllabus.discipline_name}"\n'
-            f'professor: "{syllabus.professor or ""}"\n'
+            f'discipline_slug: "{escape_yaml_str(syllabus.discipline_slug)}"\n'
+            f'discipline_name: "{escape_yaml_str(syllabus.discipline_name)}"\n'
+            f'professor: "{escape_yaml_str(syllabus.professor or "")}"\n'
             "tags:\n"
             "  - mba/disciplina\n"
             f"  - mba/{syllabus.discipline_slug}\n"
@@ -180,13 +206,13 @@ def write_lesson_page(
         content = (
             "---\n"
             "type: wiki_aula\n"
-            f'discipline_slug: "{output.discipline_slug}"\n'
-            f'discipline_name: "{output.discipline_name}"\n'
+            f'discipline_slug: "{escape_yaml_str(output.discipline_slug)}"\n'
+            f'discipline_name: "{escape_yaml_str(output.discipline_name)}"\n'
             f"lesson_number: {output.lesson_number}\n"
-            f'lesson_title: "{output.lesson_title}"\n'
-            f'lesson_slug: "{output.lesson_slug}"\n'
+            f'lesson_title: "{escape_yaml_str(output.lesson_title)}"\n'
+            f'lesson_slug: "{escape_yaml_str(output.lesson_slug)}"\n'
             f"processed_date: {output.processed_date.isoformat()}\n"
-            f'source_slide: "{output.source_slide_filename}"\n'
+            f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
             f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
             f"removed_claims: {output.removed_unsupported_claims}\n"
             "tags:\n"
@@ -222,13 +248,13 @@ def write_lesson_page(
     new_header = (
         "---\n"
         "type: wiki_aula\n"
-        f'discipline_slug: "{output.discipline_slug}"\n'
-        f'discipline_name: "{output.discipline_name}"\n'
+        f'discipline_slug: "{escape_yaml_str(output.discipline_slug)}"\n'
+        f'discipline_name: "{escape_yaml_str(output.discipline_name)}"\n'
         f"lesson_number: {output.lesson_number}\n"
-        f'lesson_title: "{output.lesson_title}"\n'
-        f'lesson_slug: "{output.lesson_slug}"\n'
+        f'lesson_title: "{escape_yaml_str(output.lesson_title)}"\n'
+        f'lesson_slug: "{escape_yaml_str(output.lesson_slug)}"\n'
         f"processed_date: {output.processed_date.isoformat()}\n"
-        f'source_slide: "{output.source_slide_filename}"\n'
+        f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
         f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
         f"removed_claims: {output.removed_unsupported_claims}\n"
         "tags:\n"
@@ -284,8 +310,8 @@ def write_atomic_zettel(
         content = (
             "---\n"
             "type: zettel\n"
-            f'slug: "{zettel.slug}"\n'
-            f'title: "{zettel.title}"\n'
+            f'slug: "{escape_yaml_str(zettel.slug)}"\n'
+            f'title: "{escape_yaml_str(zettel.title)}"\n'
             "tags:\n"
             f"{tag_lines}\n"
             "---\n\n"
@@ -312,11 +338,11 @@ def write_atomic_zettel(
         )
 
     # 1. Merge domain tags into frontmatter without duplicates
-    fm_match = re.match(r"^---\n(.*?)\n---\n", existing_content, re.DOTALL)
+    fm_match = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", existing_content, re.DOTALL)
     existing_tags: list[str] = []
     if fm_match:
         fm_text = fm_match.group(1)
-        tags_section = re.search(r"tags:\n((?:\s+-\s+[^\n]+\n?)+)", fm_text)
+        tags_section = re.search(r"tags:\r?\n((?:\s+-\s+[^\n]+\r?\n?)+)", fm_text)
         if tags_section:
             for line in tags_section.group(1).splitlines():
                 t = line.strip().lstrip("-").strip()
@@ -331,8 +357,8 @@ def write_atomic_zettel(
     new_fm = (
         "---\n"
         "type: zettel\n"
-        f'slug: "{zettel.slug}"\n'
-        f'title: "{zettel.title}"\n'
+        f'slug: "{escape_yaml_str(zettel.slug)}"\n'
+        f'title: "{escape_yaml_str(zettel.title)}"\n'
         "tags:\n"
         f"{merged_tags_str}\n"
         "---\n"
@@ -341,6 +367,41 @@ def write_atomic_zettel(
     body_and_links = (
         existing_content[fm_match.end() : start_idx] if fm_match else existing_content[:start_idx]
     )
+
+    # Merge related_links into ## Conexoes Diretas
+    conexoes_match = re.search(
+        r"## Conexoes Diretas\r?\n([\s\S]*?)(?=\r?\n## |\r?\n<!-- |$)",
+        body_and_links,
+    )
+    if conexoes_match:
+        existing_direct_links = re.findall(
+            r"- \[\[([^\]|]+)(?:\|[^\]]+)?\]\]", conexoes_match.group(1)
+        )
+        merged_direct_links = list(existing_direct_links)
+        for link in zettel.related_links:
+            if link not in merged_direct_links:
+                merged_direct_links.append(link)
+        new_conexoes_block = "## Conexoes Diretas\n" + "\n".join(
+            f"- [[{link_slug}]]" for link_slug in merged_direct_links
+        )
+        body_and_links = (
+            body_and_links[: conexoes_match.start()]
+            + new_conexoes_block
+            + body_and_links[conexoes_match.end() :]
+        )
+    elif zettel.related_links:
+        ref_idx = body_and_links.find("## Referencias no Curso")
+        new_conexoes_block = (
+            "## Conexoes Diretas\n"
+            + "\n".join(f"- [[{link_slug}]]" for link_slug in zettel.related_links)
+            + "\n\n"
+        )
+        if ref_idx != -1:
+            body_and_links = (
+                body_and_links[:ref_idx] + new_conexoes_block + body_and_links[ref_idx:]
+            )
+        else:
+            body_and_links = body_and_links.rstrip() + "\n\n" + new_conexoes_block
 
     # 2. Merge backlinks inside AUTO-BACKLINKS block
     inside_block = existing_content[start_idx + len(AUTO_BACKLINKS_START) : end_idx]
@@ -406,7 +467,7 @@ def export_lesson_to_vault(
     """Coordinates idempotent export of all lesson artifacts to the Obsidian Vault.
 
     Executes write_lesson_page, write_discipline_index, write_atomic_zettel for all
-    extracted concepts, and write_audit_report.
+    extracted concepts, write_audit_report, and writes dialectical tensions when present.
 
     Args:
         vault_root: Target Obsidian Vault root directory.
@@ -430,12 +491,223 @@ def export_lesson_to_vault(
 
     audit_path = write_audit_report(vault_root=vault_root, output=output)
 
+    tension_paths: list[Path] = []
+    tensions_index_path: Path | None = None
+    if output.detected_tensions:
+        for tension in output.detected_tensions:
+            t_path = write_dialectical_tension(
+                vault_root=vault_root,
+                tension=tension,
+                output=output,
+            )
+            tension_paths.append(t_path)
+        tensions_index_path = write_tensions_index(
+            vault_root=vault_root,
+            tensions=output.detected_tensions,
+        )
+
     return VaultExportResult(
         lesson_path=lesson_path,
         index_path=index_path,
         zettel_paths=zettel_paths,
         audit_report_path=audit_path,
+        tension_paths=tension_paths,
+        tensions_index_path=tensions_index_path,
     )
+
+
+def write_dialectical_tension(
+    vault_root: Path,
+    tension: DialecticalTension,
+    output: WikiLessonOutput,
+) -> Path:
+    """Creates or idempotently updates a dialectical tension note in 04_Diario_Tensoes.
+
+    Preserves manual notes, updates related atomic concepts without duplication,
+    and appends the current lesson to the evidence list.
+
+    Args:
+        vault_root: Root directory of the target Obsidian Vault.
+        tension: DialecticalTension model containing poles, thesis, and synthesis.
+        output: Processed WikiLessonOutput with current lesson details.
+
+    Returns:
+        Path to the written or updated tension Markdown note.
+
+    Raises:
+        ValueError: If delimiters are damaged or missing in an existing tension file.
+        OSError: If directory creation or file writing fails.
+    """
+    tensions_dir = vault_root / "04_Diario_Tensoes"
+    tensions_dir.mkdir(parents=True, exist_ok=True)
+    tension_path = tensions_dir / f"{tension.slug}.md"
+
+    lesson_link = f"[[Aula_{output.lesson_number:02d}_{output.lesson_slug}]]"
+    evidence_line = (
+        f"- {lesson_link} ({output.discipline_name}): Tensão observada em {output.lesson_title}."
+    )
+
+    if not tension_path.is_file():
+        z_lines = "\n".join(f"- [[{z}]]" for z in sorted(tension.related_zettel_slugs))
+        z_block = f"\n{z_lines}\n" if z_lines else "\n"
+        ev_block = f"\n{evidence_line}\n"
+
+        content = (
+            "---\n"
+            'type: "diario_tensao"\n'
+            f'slug: "{escape_yaml_str(tension.slug)}"\n'
+            f'title: "{escape_yaml_str(tension.title)}"\n'
+            f'pole_a: "{escape_yaml_str(tension.pole_a_framework)}"\n'
+            f'pole_b: "{escape_yaml_str(tension.pole_b_framework)}"\n'
+            "tags:\n"
+            "  - mba/tensao\n"
+            "  - mba/dilema-executivo\n"
+            "---\n\n"
+            f"# {tension.title}\n\n"
+            "> [!abstract] Natureza do Trade-off\n"
+            f"> {tension.tension_nature}\n\n"
+            "## Polaridades Dialéticas\n\n"
+            "| Dimensão | Polo A (Tese) | Polo B (Antítese) |\n"
+            "| :--- | :--- | :--- |\n"
+            f"| **Disciplina** | {tension.pole_a_discipline} | {tension.pole_b_discipline} |\n"
+            f"| **Modelo/Framework** | {tension.pole_a_framework} | {tension.pole_b_framework} |\n"
+            f"| **Proposição Central** | {tension.pole_a_thesis} | {tension.pole_b_thesis} |\n\n"
+            "## Diretrizes de Síntese e Arbitragem Gerencial\n"
+            f"{tension.synthesis_guidelines}\n\n"
+            "## Conceitos Atômicos Relacionados\n"
+            f"{AUTO_ZETTELS_START}{z_block}{AUTO_ZETTELS_END}\n\n"
+            "## Aulas e Evidências Concorrentes\n"
+            f"{AUTO_EVIDENCES_START}{ev_block}{AUTO_EVIDENCES_END}\n\n"
+            "---\n"
+            "## Anotações Pessoais e Resoluções Práticas\n"
+            "<!-- Espaço preservado em reprocessamentos -->\n"
+        )
+        tension_path.write_text(content, encoding="utf-8")
+        return tension_path
+
+    existing_content = tension_path.read_text(encoding="utf-8")
+
+    z_start = existing_content.find(AUTO_ZETTELS_START)
+    z_end = existing_content.find(AUTO_ZETTELS_END)
+    ev_start = existing_content.find(AUTO_EVIDENCES_START)
+    ev_end = existing_content.find(AUTO_EVIDENCES_END)
+
+    if -1 in (z_start, z_end, ev_start, ev_end):
+        raise ValueError(f"Delimiters missing or damaged in tension note: {tension_path}")
+
+    # 1. Update related zettels block
+    z_block_content = existing_content[z_start + len(AUTO_ZETTELS_START) : z_end]
+    existing_zettels = re.findall(r"-\s*\[\[([^\]]+)\]\]", z_block_content)
+    merged_zettels = list(dict.fromkeys(existing_zettels + tension.related_zettel_slugs))
+    new_z_lines = "\n".join(f"- [[{z}]]" for z in merged_zettels)
+    new_z_block = f"\n{new_z_lines}\n" if new_z_lines else "\n"
+
+    # 2. Update evidences block
+    ev_block_content = existing_content[ev_start + len(AUTO_EVIDENCES_START) : ev_end]
+    existing_evidences = [
+        line.strip() for line in ev_block_content.strip().splitlines() if line.strip()
+    ]
+
+    if not any(lesson_link in line for line in existing_evidences):
+        existing_evidences.append(evidence_line)
+
+    new_ev_lines = "\n".join(existing_evidences)
+    new_ev_block = f"\n{new_ev_lines}\n" if new_ev_lines else "\n"
+
+    part1 = existing_content[:z_start]
+    part2 = existing_content[z_end + len(AUTO_ZETTELS_END) : ev_start]
+    part3 = existing_content[ev_end + len(AUTO_EVIDENCES_END) :]
+
+    updated_content = (
+        f"{part1}{AUTO_ZETTELS_START}{new_z_block}{AUTO_ZETTELS_END}"
+        f"{part2}{AUTO_EVIDENCES_START}{new_ev_block}{AUTO_EVIDENCES_END}"
+        f"{part3}"
+    )
+    tension_path.write_text(updated_content, encoding="utf-8")
+    return tension_path
+
+
+def write_tensions_index(
+    vault_root: Path,
+    tensions: list[DialecticalTension],
+) -> Path:
+    """Creates or idempotently updates the master index of dialectical tensions.
+
+    Args:
+        vault_root: Root directory of the target Obsidian Vault.
+        tensions: List of DialecticalTension instances to index.
+
+    Returns:
+        Path to the written or updated _Indice_Tensoes.md file.
+
+    Raises:
+        ValueError: If delimiters are damaged in an existing tensions index file.
+        OSError: If directory creation or file writing fails.
+    """
+    tensions_dir = vault_root / "04_Diario_Tensoes"
+    tensions_dir.mkdir(parents=True, exist_ok=True)
+    index_path = tensions_dir / "_Indice_Tensoes.md"
+
+    def format_entry(t: DialecticalTension) -> str:
+        return (
+            f"- [[{t.slug}|{t.title}]] "
+            f"(`{t.pole_a_discipline}` vs `{t.pole_b_discipline}`): {t.tension_nature}"
+        )
+
+    if not index_path.is_file():
+        entries = "\n".join(format_entry(t) for t in sorted(tensions, key=lambda x: x.slug))
+        block = f"\n{entries}\n" if entries else "\n"
+        content = (
+            "---\n"
+            'type: "moc_tensoes"\n'
+            'title: "Índice de Tensões Dialéticas e Dilemas Executivos"\n'
+            "tags:\n"
+            "  - mba/indice\n"
+            "  - mba/tensoes\n"
+            "---\n\n"
+            "# Diário de Tensões Dialéticas do MBA\n\n"
+            "> [!quote] Visão Sistêmica\n"
+            "> Mapeamento de trade-offs, polaridades teóricas e conflitos de modelos "
+            "entre disciplinas do MBA.\n\n"
+            "## Matriz de Tensões Mapeadas\n"
+            f"{AUTO_TENSIONS_START}{block}{AUTO_TENSIONS_END}\n\n"
+            "---\n"
+            "## Notas de Síntese Pessoal\n"
+            "<!-- Espaço preservado em reprocessamentos -->\n"
+        )
+        index_path.write_text(content, encoding="utf-8")
+        return index_path
+
+    existing_content = index_path.read_text(encoding="utf-8")
+    start_idx = existing_content.find(AUTO_TENSIONS_START)
+    end_idx = existing_content.find(AUTO_TENSIONS_END)
+
+    if start_idx == -1 or end_idx == -1:
+        raise ValueError(f"Delimiters missing or damaged in tensions index: {index_path}")
+
+    block_content = existing_content[start_idx + len(AUTO_TENSIONS_START) : end_idx]
+    existing_lines = [line.strip() for line in block_content.strip().splitlines() if line.strip()]
+
+    existing_slugs: set[str] = set()
+    for line in existing_lines:
+        match = re.search(r"\[\[([^|\]]+)", line)
+        if match:
+            existing_slugs.add(match.group(1))
+
+    new_lines = list(existing_lines)
+    for t in sorted(tensions, key=lambda x: x.slug):
+        if t.slug not in existing_slugs:
+            new_lines.append(format_entry(t))
+            existing_slugs.add(t.slug)
+
+    new_lines.sort()
+    new_block = "\n" + "\n".join(new_lines) + "\n" if new_lines else "\n"
+
+    part1 = existing_content[:start_idx]
+    part2 = existing_content[end_idx + len(AUTO_TENSIONS_END) :]
+    updated_content = f"{part1}{AUTO_TENSIONS_START}{new_block}{AUTO_TENSIONS_END}{part2}"
+    index_path.write_text(updated_content, encoding="utf-8")
+    return index_path
 
 
 __all__ = [
@@ -443,13 +715,21 @@ __all__ = [
     "AUTO_BACKLINKS_START",
     "AUTO_CONTENT_END",
     "AUTO_CONTENT_START",
+    "AUTO_EVIDENCES_END",
+    "AUTO_EVIDENCES_START",
     "AUTO_LESSONS_END",
     "AUTO_LESSONS_START",
+    "AUTO_TENSIONS_END",
+    "AUTO_TENSIONS_START",
+    "AUTO_ZETTELS_END",
+    "AUTO_ZETTELS_START",
     "VaultExportResult",
     "export_lesson_to_vault",
     "format_zettels_section",
     "write_atomic_zettel",
     "write_audit_report",
+    "write_dialectical_tension",
     "write_discipline_index",
     "write_lesson_page",
+    "write_tensions_index",
 ]

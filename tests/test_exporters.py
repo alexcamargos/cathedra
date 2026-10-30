@@ -16,12 +16,15 @@ from mba_wiki.exporters.obsidian_writer import (
     format_zettels_section,
     write_atomic_zettel,
     write_audit_report,
+    write_dialectical_tension,
     write_discipline_index,
     write_lesson_page,
+    write_tensions_index,
 )
 from mba_wiki.schemas import (
     AtomicZettel,
     ClaimAuditItem,
+    DialecticalTension,
     LessonAuditReport,
     SyllabusModule,
     WikiLessonOutput,
@@ -513,3 +516,378 @@ def test_write_atomic_zettel_missing_delimiters_raises(
 
     with pytest.raises(ValueError, match="Delimiters .* not found"):
         write_atomic_zettel(vault_root=tmp_path, zettel=zettel, output=sample_lesson_output)
+
+
+def test_write_atomic_zettel_crlf_safe_no_duplicate_frontmatter(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that existing files with CRLF line endings do not produce duplicate frontmatter.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = sample_lesson_output.extracted_zettels[0]
+    zettel_dir = tmp_path / "02_Zettelkasten"
+    zettel_dir.mkdir(parents=True, exist_ok=True)
+    zettel_path = zettel_dir / f"{zettel.slug}.md"
+
+    # Write initial file with explicit Windows CRLF line endings
+    crlf_content = (
+        "---\r\n"
+        "type: zettel\r\n"
+        f'slug: "{zettel.slug}"\r\n'
+        f'title: "{zettel.title}"\r\n'
+        "tags:\r\n"
+        "  - financas\r\n"
+        "---\r\n\r\n"
+        f"# {zettel.title}\r\n\r\n"
+        "Texto conceitual com CRLF.\r\n\r\n"
+        "## Conexoes Diretas\r\n"
+        "- [[link-antigo]]\r\n\r\n"
+        "## Referencias no Curso\r\n"
+        "<!-- AUTO-BACKLINKS:START -->\r\n"
+        "- [[Aula_00_intro]] (Introdução)\r\n"
+        "<!-- AUTO-BACKLINKS:END -->\r\n"
+    )
+    zettel_path.write_bytes(crlf_content.encode("utf-8"))
+
+    # Reprocess zettel
+    updated_path = write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel,
+        output=sample_lesson_output,
+    )
+    content = updated_path.read_text(encoding="utf-8")
+
+    # Frontmatter must not be duplicated
+    assert content.count("type: zettel") == 1
+    assert content.count("---") == 2
+    assert "<!-- AUTO-BACKLINKS:START -->" in content
+    assert "- [[Aula_00_intro]]" in content
+    expected_backlink = (
+        f"- [[Aula_{sample_lesson_output.lesson_number:02d}_{sample_lesson_output.lesson_slug}]]"
+    )
+    assert expected_backlink in content
+
+
+def test_write_lesson_page_escapes_quotes_in_yaml(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that double quotes in lesson titles are escaped in YAML frontmatter.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    quoted_output = sample_lesson_output.model_copy(
+        update={"lesson_title": 'Critérios de "Valuation" e M&A'}
+    )
+    lesson_path = write_lesson_page(vault_root=tmp_path, output=quoted_output)
+    content = lesson_path.read_text(encoding="utf-8")
+
+    assert 'lesson_title: "Critérios de \\"Valuation\\" e M&A"' in content
+
+
+def test_write_atomic_zettel_merges_new_related_links(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that reprocessing an atomic zettel merges new related links into Conexoes Diretas.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = sample_lesson_output.extracted_zettels[0]
+
+    # First write with initial related links
+    zettel_initial = zettel.model_copy(update={"related_links": ["taxa-interna-retorno"]})
+    write_atomic_zettel(vault_root=tmp_path, zettel=zettel_initial, output=sample_lesson_output)
+
+    # Second write with an additional related link
+    zettel_expanded = zettel.model_copy(
+        update={"related_links": ["taxa-interna-retorno", "custo-capital-wacc"]}
+    )
+    lesson_2 = sample_lesson_output.model_copy(
+        update={"lesson_number": 2, "lesson_title": "Aula 02"}
+    )
+    updated_path = write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel_expanded,
+        output=lesson_2,
+    )
+    content = updated_path.read_text(encoding="utf-8")
+
+    assert "- [[taxa-interna-retorno]]" in content
+    assert "- [[custo-capital-wacc]]" in content
+    assert content.count("- [[taxa-interna-retorno]]") == 1
+
+
+def test_write_dialectical_tension_creates_new_note(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests creation of a new dialectical tension markdown note.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    tension = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência de Giro vs Resiliência Operacional",
+        pole_a_discipline="operacoes",
+        pole_a_framework="Just-in-Time",
+        pole_a_thesis="Minimizar estoques e custos de armazenagem.",
+        pole_b_discipline="estrategia",
+        pole_b_framework="Gestão de Riscos",
+        pole_b_thesis="Manter estoques de segurança contra choques.",
+        tension_nature="Curto Prazo vs Longo Prazo",
+        synthesis_guidelines="Adotar políticas de dual sourcing e estoques estratégicos.",
+        related_zettel_slugs=["just-in-time", "capital-de-giro"],
+    )
+
+    tension_path = write_dialectical_tension(
+        vault_root=tmp_path,
+        tension=tension,
+        output=sample_lesson_output,
+    )
+
+    assert tension_path.is_file()
+    assert tension_path.parent.name == "04_Diario_Tensoes"
+    content = tension_path.read_text(encoding="utf-8")
+
+    assert 'type: "diario_tensao"' in content or "type: diario_tensao" in content
+    assert 'slug: "eficiencia-vs-resiliencia"' in content
+    assert "# Eficiência de Giro vs Resiliência Operacional" in content
+    assert "Curto Prazo vs Longo Prazo" in content
+    assert "Just-in-Time" in content
+    assert "Gestão de Riscos" in content
+    assert "- [[just-in-time]]" in content
+    assert "- [[capital-de-giro]]" in content
+    assert "<!-- AUTO-EVIDENCES:START -->" in content
+    assert "<!-- AUTO-EVIDENCES:END -->" in content
+    assert (
+        f"- [[Aula_{sample_lesson_output.lesson_number:02d}_{sample_lesson_output.lesson_slug}]]"
+        in content
+    )
+    assert "## Anotações Pessoais e Resoluções Práticas" in content
+
+
+def test_write_dialectical_tension_idempotent_accumulation(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that multiple lessons accumulate evidence idempotently without clobbering notes.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    tension = DialecticalTension(
+        slug="centralizacao-vs-autonomia",
+        title="Centralização vs Autonomia",
+        pole_a_discipline="organizacao",
+        pole_a_framework="Estrutura Hierárquica",
+        pole_a_thesis="Padronização e controle centralizado.",
+        pole_b_discipline="inovacao",
+        pole_b_framework="Squads Ágeis",
+        pole_b_thesis="Velocidade e descentralização de decisões.",
+        tension_nature="Controle vs Velocidade",
+        synthesis_guidelines="Autonomia com alinhamento e guardrails claros.",
+        related_zettel_slugs=["hierarquia"],
+    )
+
+    # 1. First lesson writes tension
+    path = write_dialectical_tension(
+        vault_root=tmp_path,
+        tension=tension,
+        output=sample_lesson_output,
+    )
+
+    # User adds manual personal notes
+    content = path.read_text(encoding="utf-8")
+    manual_annotation = "\nMinha nota manual: aplicar alinhamento no comitê trimestral.\n"
+    path.write_text(content + manual_annotation, encoding="utf-8")
+
+    # 2. Second lesson updates the same tension with new related zettel
+    expanded_tension = tension.model_copy(
+        update={"related_zettel_slugs": ["hierarquia", "squads-ageis"]}
+    )
+    lesson_2 = sample_lesson_output.model_copy(
+        update={
+            "lesson_number": 2,
+            "lesson_title": "Modelos Ágeis",
+            "lesson_slug": "modelos-ageis",
+        }
+    )
+    write_dialectical_tension(
+        vault_root=tmp_path,
+        tension=expanded_tension,
+        output=lesson_2,
+    )
+
+    # 3. Re-run lesson 2 to verify idempotency (no duplicate entries)
+    updated_path = write_dialectical_tension(
+        vault_root=tmp_path,
+        tension=expanded_tension,
+        output=lesson_2,
+    )
+
+    updated_content = updated_path.read_text(encoding="utf-8")
+
+    # Verify both lessons are recorded exactly once
+    lesson_1_link = (
+        f"- [[Aula_{sample_lesson_output.lesson_number:02d}_{sample_lesson_output.lesson_slug}]]"
+    )
+    assert lesson_1_link in updated_content
+    assert "- [[Aula_02_modelos-ageis]]" in updated_content
+    assert updated_content.count("- [[Aula_02_modelos-ageis]]") == 1
+
+    # Verify zettels were merged
+    assert "- [[hierarquia]]" in updated_content
+    assert "- [[squads-ageis]]" in updated_content
+    assert updated_content.count("- [[hierarquia]]") == 1
+
+    # Verify manual notes were strictly preserved
+    assert "Minha nota manual: aplicar alinhamento no comitê trimestral." in updated_content
+
+
+def test_write_tensions_index_creates_and_merges(tmp_path: Path) -> None:
+    """Tests creating and updating the tensions index MOC file (_Indice_Tensoes.md).
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    t1 = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência vs Resiliência",
+        pole_a_discipline="operacoes",
+        pole_a_framework="JIT",
+        pole_a_thesis="Estoque zero.",
+        pole_b_discipline="estrategia",
+        pole_b_framework="Resiliência",
+        pole_b_thesis="Estoque de segurança.",
+        tension_nature="Curto vs Longo Prazo",
+        synthesis_guidelines="Dual sourcing.",
+    )
+    t2 = DialecticalTension(
+        slug="custo-vs-diferenciacao",
+        title="Custo vs Diferenciação",
+        pole_a_discipline="estrategia",
+        pole_a_framework="Liderança em Custo",
+        pole_a_thesis="Preço baixo.",
+        pole_b_discipline="marketing",
+        pole_b_framework="Diferenciação",
+        pole_b_thesis="Premium de preço.",
+        tension_nature="Volume vs Margem",
+        synthesis_guidelines="Segmentação seletiva.",
+    )
+
+    # Initial write with t1
+    index_path = write_tensions_index(vault_root=tmp_path, tensions=[t1])
+    assert index_path.is_file()
+    assert index_path.name == "_Indice_Tensoes.md"
+
+    content = index_path.read_text(encoding="utf-8")
+    assert "- [[eficiencia-vs-resiliencia|Eficiência vs Resiliência]]" in content
+    assert "<!-- AUTO-TENSIONS:START -->" in content
+    assert "<!-- AUTO-TENSIONS:END -->" in content
+
+    # Add manual note
+    manual_note = "\n\nMinha reflexão executiva global.\n"
+    index_path.write_text(content + manual_note, encoding="utf-8")
+
+    # Update with t1 and t2
+    write_tensions_index(vault_root=tmp_path, tensions=[t1, t2])
+    updated_content = index_path.read_text(encoding="utf-8")
+
+    assert "- [[eficiencia-vs-resiliencia|Eficiência vs Resiliência]]" in updated_content
+    assert "- [[custo-vs-diferenciacao|Custo vs Diferenciação]]" in updated_content
+    assert updated_content.count("- [[eficiencia-vs-resiliencia|Eficiência vs Resiliência]]") == 1
+    assert "Minha reflexão executiva global." in updated_content
+
+
+def test_export_lesson_to_vault_with_tensions(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+    sample_syllabus: SyllabusModule,
+) -> None:
+    """Tests that export_lesson_to_vault persists dialectical tensions when present.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+        sample_syllabus: Sample syllabus fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    tension = DialecticalTension(
+        slug="caixa-vs-crescimento",
+        title="Caixa vs Crescimento",
+        pole_a_discipline="financas",
+        pole_a_framework="Fluxo de Caixa Livre",
+        pole_a_thesis="Foco em solvência.",
+        pole_b_discipline="estrategia",
+        pole_b_framework="Blitzscaling",
+        pole_b_thesis="Queima rápida de caixa para market share.",
+        tension_nature="Liquidez vs Expansão",
+        synthesis_guidelines="Monitorar runway mínimo de 18 meses.",
+    )
+    lesson_with_tension = sample_lesson_output.model_copy(update={"detected_tensions": [tension]})
+
+    result = export_lesson_to_vault(
+        vault_root=tmp_path,
+        output=lesson_with_tension,
+        syllabus=sample_syllabus,
+    )
+
+    assert len(result.tension_paths) == 1
+    assert result.tension_paths[0].name == "caixa-vs-crescimento.md"
+    assert result.tensions_index_path is not None
+    assert result.tensions_index_path.name == "_Indice_Tensoes.md"
+    assert result.tension_paths[0].is_file()
+    assert result.tensions_index_path.is_file()
