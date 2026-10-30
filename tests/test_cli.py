@@ -416,3 +416,166 @@ def test_get_client_from_settings(mocker: MockerFixture) -> None:
 
     client = get_client()
     assert client is mock_client
+
+
+def test_build_lesson_exports_dialectical_tensions(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    fake_llm_client: FakeLLMClient,
+    tmp_path: Path,
+) -> None:
+    """Tests that build-lesson generates dialectical tension notes and updates tensions index.
+
+    Args:
+        cli_runner: Typer CLI runner fixture.
+        synthetic_cli_pdf: Synthetic PDF slide fixture.
+        fake_llm_client: Mock LLM client fixture.
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.schemas import DialecticalTension
+
+    vault_dir = tmp_path / "vault_tensions"
+    vault_dir.mkdir(parents=True, exist_ok=True)
+    syllabus_dir = vault_dir / "00_Programa_Curso"
+    syllabus_dir.mkdir(parents=True, exist_ok=True)
+    syllabus_file = syllabus_dir / "ementa_estruturada.json"
+
+    module = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Finanças corporativas e decisões.",
+        topics=["VPL", "Custos"],
+        bibliography=["Brealey"],
+    )
+    syllabus = StructuredSyllabus(modules=[module])
+    syllabus_file.write_text(syllabus.model_dump_json(indent=2), encoding="utf-8")
+
+    tension = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência vs Resiliência",
+        pole_a_discipline="financas-corporativas",
+        pole_a_framework="Otimização de Custos",
+        pole_a_thesis="Minimizar despesas operacionais.",
+        pole_b_discipline="gestao-estrategica",
+        pole_b_framework="Capacidades Dinâmicas",
+        pole_b_thesis="Investir em redundâncias estratégicas.",
+        tension_nature="Curto vs Longo Prazo",
+        synthesis_guidelines="Criar reservas estratégicas condicionais.",
+    )
+
+    draft_result = DraftResult(
+        raw_draft="Rascunho de finanças corporativas integrando tensões de longo prazo.",
+        detected_tensions=[tension],
+    )
+    fake_llm_client.add_structured_response(draft_result)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_text_response("Rascunho polido de finanças corporativas.")
+    set_client_override(fake_llm_client)
+
+    try:
+        result = cli_runner.invoke(
+            app,
+            [
+                "build-lesson",
+                str(synthetic_cli_pdf),
+                "--discipline",
+                "financas-corporativas",
+                "--lesson",
+                "1",
+                "--vault",
+                str(vault_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Tensões Dialéticas exportadas: 1" in result.output
+
+        tension_file = vault_dir / "04_Diario_Tensoes" / "eficiencia-vs-resiliencia.md"
+        assert tension_file.is_file()
+        index_file = vault_dir / "04_Diario_Tensoes" / "_Indice_Tensoes.md"
+        assert index_file.is_file()
+        assert "Eficiência vs Resiliência" in index_file.read_text(encoding="utf-8")
+    finally:
+        set_client_override(None)
+
+
+def test_sync_tensions_command(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """Tests sync-tensions command re-indexing existing notes into _Indice_Tensoes.md.
+
+    Args:
+        cli_runner: Typer CLI runner fixture.
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    vault_dir = tmp_path / "vault_sync"
+    tensions_dir = vault_dir / "04_Diario_Tensoes"
+    tensions_dir.mkdir(parents=True, exist_ok=True)
+
+    # Note 1
+    note1 = (
+        "---\n"
+        'type: "diario_tensao"\n'
+        'slug: "custo-vs-qualidade"\n'
+        'title: "Custo vs Qualidade"\n'
+        'pole_a: "Lean Operations"\n'
+        'pole_b: "Six Sigma"\n'
+        "---\n\n"
+        "# Custo vs Qualidade\n\n"
+        "> [!abstract] Natureza do Trade-off\n"
+        "> Eficiência em Custo vs Excelência em Qualidade\n\n"
+        "| Dimensão | Polo A (Tese) | Polo B (Antítese) |\n"
+        "| :--- | :--- | :--- |\n"
+        "| **Disciplina** | operacoes | qualidade |\n"
+        "| **Modelo/Framework** | Lean | Six Sigma |\n"
+        "| **Proposição Central** | Eliminar desperdícios | Zero defeitos |\n"
+    )
+    (tensions_dir / "custo-vs-qualidade.md").write_text(note1, encoding="utf-8")
+
+    result = cli_runner.invoke(
+        app,
+        ["sync-tensions", "--vault", str(vault_dir)],
+    )
+    assert result.exit_code == 0
+    assert "Índice de tensões sincronizado" in result.output
+
+    index_file = tensions_dir / "_Indice_Tensoes.md"
+    assert index_file.is_file()
+    assert "- [[custo-vs-qualidade|Custo vs Qualidade]]" in index_file.read_text(encoding="utf-8")
+
+
+def test_sync_tensions_empty_vault(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """Tests sync-tensions gracefully reporting when no tension notes exist.
+
+    Args:
+        cli_runner: Typer CLI runner fixture.
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    vault_dir = tmp_path / "vault_empty"
+    result = cli_runner.invoke(
+        app,
+        ["sync-tensions", "--vault", str(vault_dir)],
+    )
+    assert result.exit_code == 0
+    assert "Nenhuma nota de tensão encontrada" in result.output
