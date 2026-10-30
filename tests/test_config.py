@@ -32,6 +32,7 @@ def test_default_settings() -> None:
     assert settings.wiki_path == expected_vault / "01_Wiki_Disciplinas"
     assert settings.zettel_path == expected_vault / "02_Zettelkasten"
     assert settings.audit_path == expected_vault / "03_Auditoria_Factual"
+    assert settings.tensions_path == expected_vault / "04_Diario_Tensoes"
     assert (
         settings.resolved_syllabus_json_path
         == expected_vault / "00_Programa_Curso" / "ementa_estruturada.json"
@@ -129,6 +130,7 @@ def test_ensure_vault_directories(tmp_path: Path) -> None:
     assert settings.wiki_path.is_dir()
     assert settings.zettel_path.is_dir()
     assert settings.audit_path.is_dir()
+    assert settings.tensions_path.is_dir()
 
 
 def test_get_settings_cached() -> None:

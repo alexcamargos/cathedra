@@ -118,6 +118,21 @@ class Settings(BaseSettings):
         return self.obsidian_vault_path / "03_Auditoria_Factual"
 
     @property
+    def tensions_path(self) -> Path:
+        """Returns the directory path for dialectical tension notes.
+
+        Args:
+            None.
+
+        Returns:
+            Path: Filesystem path to the 04_Diario_Tensoes directory.
+
+        Raises:
+            None.
+        """
+        return self.obsidian_vault_path / "04_Diario_Tensoes"
+
+    @property
     def resolved_syllabus_json_path(self) -> Path:
         """Resolves the syllabus JSON path, falling back to default vault topology.
 
@@ -151,6 +166,7 @@ class Settings(BaseSettings):
         self.wiki_path.mkdir(parents=True, exist_ok=True)
         self.zettel_path.mkdir(parents=True, exist_ok=True)
         self.audit_path.mkdir(parents=True, exist_ok=True)
+        self.tensions_path.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
