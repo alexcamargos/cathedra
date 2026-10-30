@@ -13,6 +13,8 @@ from mba_wiki.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
+    CrossDisciplineLink,
+    DialecticalTension,
     DraftResult,
     FactCheckResult,
     HumanizerResult,
@@ -549,3 +551,243 @@ def test_humanizer_result_valid_and_defaults() -> None:
 
     with pytest.raises(ValidationError):
         HumanizerResult.model_validate({})
+
+
+def test_cross_discipline_link_valid() -> None:
+    """Tests successful instantiation, validation, and serialization of CrossDisciplineLink.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    link = CrossDisciplineLink(
+        target_discipline_slug="financas-corporativas",
+        target_topic="Ciclo de Conversao de Caixa",
+        connection_type="impact",
+        description="A politica de estoques Just-in-Time afeta a necessidade de capital de giro.",
+    )
+    assert link.target_discipline_slug == "financas-corporativas"
+    assert link.target_topic == "Ciclo de Conversao de Caixa"
+    assert link.connection_type == "impact"
+    assert "capital de giro" in link.description
+
+    dumped = link.model_dump()
+    restored = CrossDisciplineLink.model_validate(dumped)
+    assert restored == link
+
+
+def test_cross_discipline_link_validation_errors() -> None:
+    """Tests validation constraints and rejected types for CrossDisciplineLink.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    with pytest.raises(ValidationError):
+        # Invalid connection_type
+        CrossDisciplineLink(
+            target_discipline_slug="financas",
+            target_topic="VPL",
+            connection_type="invalid_type",  # type: ignore[arg-type]
+            description="Descricao invalida.",
+        )
+
+    with pytest.raises(ValidationError):
+        # Missing required fields
+        CrossDisciplineLink.model_validate({"target_discipline_slug": "financas"})
+
+
+def test_dialectical_tension_valid_and_defaults() -> None:
+    """Tests successful instantiation and default list handling of DialecticalTension.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    tension = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência Operacional vs Resiliência de Suprimentos",
+        pole_a_discipline="gestao-de-operacoes",
+        pole_a_framework="Lean / Just-in-Time",
+        pole_a_thesis="Minimizar estoques e variabilidade para maximizar giro de capital.",
+        pole_b_discipline="gestao-estrategica",
+        pole_b_framework="Resiliência da Cadeia e Teoria de Opções",
+        pole_b_thesis=(
+            "Manter estoques de segurança e múltiplos fornecedores para absorver choques."
+        ),
+        tension_nature="Eficiência de Curto Prazo vs Sobrevivência e Continuidade",
+        synthesis_guidelines=(
+            "Adotar estoques estratégicos para componentes críticos (dual sourcing)."
+        ),
+    )
+    assert tension.slug == "eficiencia-vs-resiliencia"
+    assert tension.related_zettel_slugs == []
+
+    dumped = tension.model_dump()
+    restored = DialecticalTension.model_validate(dumped)
+    assert restored == tension
+
+
+def test_dialectical_tension_with_zettels_and_validation() -> None:
+    """Tests DialecticalTension with populated zettel links and validation rejection.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    tension = DialecticalTension(
+        slug="dcf-vs-opcoes-reais",
+        title="Valuation por DCF vs Teoria de Opções Reais",
+        pole_a_discipline="financas",
+        pole_a_framework="DCF (Fluxo de Caixa Descontado)",
+        pole_a_thesis="Rejeitar projetos com VPL negativo calculado no horizonte determinístico.",
+        pole_b_discipline="inovacao",
+        pole_b_framework="Opções Reais de Crescimento",
+        pole_b_thesis=(
+            "Projetos inovadores contêm opções de expansão que o DCF tradicional subavalia."
+        ),
+        tension_nature="Rigor Analítico vs Flexibilidade Estratégica em Alta Incerteza",
+        synthesis_guidelines=(
+            "Usar DCF para negócios maduros e Opções Reais para P&D em estágios iniciais."
+        ),
+        related_zettel_slugs=["valor-presente-liquido", "teoria-opcoes-reais"],
+    )
+    assert len(tension.related_zettel_slugs) == 2
+
+    with pytest.raises(ValidationError):
+        # Missing required field
+        DialecticalTension.model_validate({"slug": "incompleto"})
+
+
+def test_draft_result_with_cross_links_and_tensions() -> None:
+    """Tests DraftResult extension supporting cross_links and detected_tensions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    link = CrossDisciplineLink(
+        target_discipline_slug="marketing",
+        target_topic="Precificacao e Elasticidade",
+        connection_type="synergy",
+        description="A margem de contribuicao define o piso de precos do Marketing.",
+    )
+    tension = DialecticalTension(
+        slug="lucro-curto-prazo-vs-marca",
+        title="Margem Imediata vs Construção de Marca",
+        pole_a_discipline="controladoria",
+        pole_a_framework="Orçamento Base Zero",
+        pole_a_thesis="Cortar verbas discricionárias para atingir EBITDA trimestral.",
+        pole_b_discipline="marketing",
+        pole_b_framework="Brand Equity",
+        pole_b_thesis="Cortes em publicidade deterioram o valor intangível no longo prazo.",
+        tension_nature="Metas Trimestrais vs Sustentabilidade de Marca",
+        synthesis_guidelines=(
+            "Proteger percentual fixo de receita para branding e amortizar como investimento."
+        ),
+    )
+    draft = DraftResult(
+        raw_draft="Rascunho rico com pontes e dilemas.",
+        cross_links=[link],
+        detected_tensions=[tension],
+    )
+    assert len(draft.cross_links) == 1
+    assert len(draft.detected_tensions) == 1
+
+    # Verify backward compatibility when omitting new fields
+    legacy_draft = DraftResult(raw_draft="Apenas o rascunho legado.")
+    assert legacy_draft.cross_links == []
+    assert legacy_draft.detected_tensions == []
+
+
+def test_wiki_lesson_output_with_cross_links_and_tensions() -> None:
+    """Tests WikiLessonOutput extension supporting cross_links and detected_tensions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    output = WikiLessonOutput(
+        discipline_slug="operacoes",
+        discipline_name="Gestão de Operações",
+        lesson_number=1,
+        lesson_title="Lean Manufacturing",
+        lesson_slug="lean-manufacturing",
+        processed_date=date(2026, 10, 19),
+        source_slide_filename="aula01.pdf",
+        fact_check_passed=True,
+        removed_unsupported_claims=0,
+        body_markdown="Corpo da aula.",
+        extracted_zettels=[],
+        cross_links=[],
+        detected_tensions=[],
+    )
+    assert output.cross_links == []
+    assert output.detected_tensions == []
+
+    dumped = output.model_dump()
+    restored = WikiLessonOutput.model_validate(dumped)
+    assert restored == output
+
+
+def test_lesson_pipeline_state_with_cross_links_and_tensions() -> None:
+    """Tests LessonPipelineState extension supporting cross_links and detected_tensions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    module = SyllabusModule(
+        discipline_slug="operacoes",
+        discipline_name="Gestão de Operações",
+        syllabus_summary="Resumo de operações.",
+        topics=["Lean", "Six Sigma"],
+        bibliography=["Slack. Administração da Produção."],
+    )
+    state = LessonPipelineState(
+        discipline_slug="operacoes",
+        discipline_name="Gestão de Operações",
+        lesson_number=1,
+        lesson_title="Lean",
+        lesson_slug="lean",
+        source_slide_filename="slides.pdf",
+        slides=[],
+        syllabus=module,
+    )
+    assert state.cross_links == []
+    assert state.detected_tensions == []
