@@ -5,6 +5,7 @@ mechanical AI clichés, and validating outputs against validators.py with a retr
 loop allowing up to 3 self-correction attempts.
 """
 
+import re
 from pathlib import Path
 
 from mba_wiki.agents.llm_client import StructuredLLMClient
@@ -96,6 +97,25 @@ def format_remediation_feedback(
     return "\n".join(lines)
 
 
+def strip_markdown_fences(text: str) -> str:
+    """Removes outer markdown code fences from LLM responses if present.
+
+    Args:
+        text: Raw text string potentially wrapped in ```markdown ... ``` fences.
+
+    Returns:
+        Stripped text without outer markdown code fences.
+
+    Raises:
+        None.
+    """
+    clean = text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:markdown|md)?\s*\n?", "", clean)
+        clean = re.sub(r"\n?\s*```$", "", clean)
+    return clean.strip()
+
+
 def humanize_text(
     text: str,
     client: StructuredLLMClient,
@@ -135,11 +155,12 @@ def humanize_text(
                 previous_text=current_candidate,
             )
 
-        current_candidate = client.generate_text(
+        raw_output = client.generate_text(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
-        ).strip()
+        )
+        current_candidate = strip_markdown_fences(raw_output)
 
         validation = validate_markdown_prose(current_candidate)
         if validation.is_valid:
@@ -165,10 +186,11 @@ def humanize_node(
     """Graph node executor for the stylistic humanizing stage in the lesson pipeline.
 
     Receives the pipeline state after factual auditing, humanizes the audited markdown
-    within the retry loop, and updates state with polished prose and retry metrics.
+    and the content_markdown of any extracted zettels within the retry loop, and
+    updates state with polished prose and retry metrics.
 
     Args:
-        state: Pipeline state containing audited markdown.
+        state: Pipeline state containing audited markdown and extracted zettels.
         client: Structured LLM client implementation.
         max_attempts: Maximum retry count for humanizer convergence.
 
@@ -187,6 +209,19 @@ def humanize_node(
 
     state.humanized_markdown = result.humanized_text
     state.humanizer_retry_count = result.retry_count
+
+    # Humanize and validate extracted zettels if they contain linter violations
+    for zettel in state.extracted_zettels:
+        if zettel.content_markdown.strip():
+            zettel_validation = validate_markdown_prose(zettel.content_markdown)
+            if not zettel_validation.is_valid:
+                zettel_result = humanize_text(
+                    text=zettel.content_markdown,
+                    client=client,
+                    max_attempts=max_attempts,
+                )
+                zettel.content_markdown = zettel_result.humanized_text
+
     return state
 
 
@@ -197,4 +232,5 @@ __all__ = [
     "get_humanizer_prompt",
     "humanize_node",
     "humanize_text",
+    "strip_markdown_fences",
 ]

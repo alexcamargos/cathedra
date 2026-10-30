@@ -246,3 +246,100 @@ def test_humanize_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) ->
     assert updated_state.humanized_markdown == clean_humanized
     assert updated_state.humanizer_retry_count == 1
     assert len(updated_state.extracted_zettels) == 1
+
+
+def test_humanize_text_strips_markdown_fences_and_catches_violations(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that outer markdown fences are stripped and violations inside them are intercepted.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    # Attempt 1: Wrapped in markdown fence but contains an em-dash (must not bypass linter)
+    fenced_with_violation = (
+        "```markdown\nO método do VPL analisa decisões — segundo a literatura financeira.\n```"
+    )
+    # Attempt 2: Clean prose still wrapped in markdown fence
+    fenced_clean = (
+        "```markdown\nO método do VPL analisa decisões, segundo a literatura financeira.\n```"
+    )
+    fake_llm_client.add_text_response(fenced_with_violation)
+    fake_llm_client.add_text_response(fenced_clean)
+
+    result = humanize_text(
+        text="Rascunho de aula.",
+        client=fake_llm_client,
+        max_attempts=3,
+    )
+
+    assert result.is_valid is True
+    assert result.retry_count == 2
+    # Verify fences were stripped from the final text
+    assert not result.humanized_text.startswith("```")
+    assert not result.humanized_text.endswith("```")
+    assert (
+        "O método do VPL analisa decisões, segundo a literatura financeira."
+        in result.humanized_text
+    )
+
+
+def test_humanize_node_humanizes_extracted_zettels(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that humanize_node processes and polishes content_markdown of extracted zettels.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Resumo",
+        topics=["VPL"],
+        bibliography=["Livro"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Texto")]
+    zettel = AtomicZettel(
+        slug="vpl",
+        title="VPL",
+        domain_tags=["financas"],
+        content_markdown="Rascunho de zettel com termo crucial para avaliação.",
+        related_links=[],
+    )
+    state = LessonPipelineState(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        lesson_number=1,
+        lesson_title="Critérios de Decisão",
+        lesson_slug="criterios-decisao",
+        source_slide_filename="aula1.pdf",
+        slides=slides,
+        syllabus=syllabus,
+        audited_markdown="Texto de aula aprovado na auditoria.",
+        extracted_zettels=[zettel],
+    )
+
+    clean_lesson = "Texto de aula polido e humanizado com clareza conceitual."
+    clean_zettel = "Conceito de VPL estruturado sem adjetivos histriônicos."
+
+    # First call is for the lesson body, second call is for the zettel
+    fake_llm_client.add_text_response(clean_lesson)
+    fake_llm_client.add_text_response(clean_zettel)
+
+    updated_state = humanize_node(state=state, client=fake_llm_client)
+
+    assert updated_state.humanized_markdown == clean_lesson
+    assert len(updated_state.extracted_zettels) == 1
+    assert updated_state.extracted_zettels[0].content_markdown == clean_zettel
+    assert len(fake_llm_client.calls) == 2
