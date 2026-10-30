@@ -326,3 +326,93 @@ def test_validation_result_and_violation_dataclasses() -> None:
     result = ValidationResult(is_valid=False, violations=[violation])
     assert result.is_valid is False
     assert len(result.violations) == 1
+
+
+def test_academic_citation_abbreviations_do_not_split_sentences() -> None:
+    """Tests that academic page and volume abbreviations do not trigger sentence boundaries.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    citation_text = (
+        "Segundo Damodaran (2012, p. 45), o fluxo de caixa reflete a geração real de valor. "
+        "A análise prossegue no cap. 3 da mesma obra com exemplos empíricos de valuation. "
+        "Conforme demonstrado por Brealey e Myers (vol. 2, pp. 110-112), a dívida reduz impostos. "
+        "Dessa forma, o gestor financeiro calibra o endividamento ótimo com cautela."
+    )
+    result = validate_markdown_prose(citation_text)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in result.violations)
+
+
+def test_markdown_tables_do_not_trigger_r3_paragraph_limit() -> None:
+    """Tests that GFM markdown tables with multiple lines do not trigger R3 paragraph length.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    table_prose = (
+        "| Indicador | Metodologia | Aplicação Principal |\n"
+        "| --- | --- | --- |\n"
+        "| VPL | Desconto de fluxos futuros. | Projetos de capital. |\n"
+        "| TIR | Taxa que zera o VPL. | Comparação percentual. |\n"
+        "| Payback | Tempo de recuperação. | Avaliação de liquidez. |\n"
+        "| WACC | Custo médio de capital. | Taxa de desconto mínima. |\n"
+        "| CAPM | Retorno versus risco beta. | Custo de capital próprio. |"
+    )
+    result = validate_markdown_prose(table_prose)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in result.violations)
+
+
+def test_ai_bullet_pattern_with_colon_outside_bold() -> None:
+    """Tests detection of AI-style mechanical bullet points when colon is outside bold.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    bullet_prose = (
+        "Os principais conceitos da aula são:\n"
+        "- **Valor Presente Líquido**: mensura a riqueza gerada pelo investimento.\n"
+        "- **Taxa Interna de Retorno**: taxa que iguala o VPL a zero."
+    )
+    result = validate_markdown_prose(bullet_prose)
+    assert any(v.rule_id == "R4_AI_BULLET" for v in result.violations)
+
+
+def test_sentence_split_handles_closing_quotes_and_parentheses() -> None:
+    """Tests that sentence counting correctly handles sentences ending with quotes or parentheses.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.agents.validators import count_sentences
+
+    text_with_quotes = (
+        'O autor afirmou: "O VPL é a regra de ouro." '
+        'Em seguida, destacou: "A TIR possui limitações." '
+        "Por fim, concluiu a análise teórica."
+    )
+    assert count_sentences(text_with_quotes) == 3

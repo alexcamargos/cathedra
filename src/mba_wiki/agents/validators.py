@@ -15,11 +15,11 @@ RE_DECORATIVE_ARROWS = re.compile(r"[→⇒←⇐↔↕↗↘↖↙]")
 RE_EMOJIS = re.compile(r"[\U0001F300-\U0001FAFF]|[\U00002600-\U000027BF]")
 
 # Rule R4: Prohibited mechanical bullet list pattern
-RE_AI_BULLET_PATTERN = re.compile(r"^\s*[-*]\s+\*\*[^*]+:\*\*\s+", re.MULTILINE)
+RE_AI_BULLET_PATTERN = re.compile(r"^\s*[-*]\s+\*\*[^*]+(?::\*\*|\*\*:\s*)", re.MULTILINE)
 
 # Common abbreviations and tokens that should not trigger sentence boundary splits
 RE_ABBREVIATIONS = re.compile(
-    r"\b(?:ex|i\.e|e\.g|dr|dra|prof|profa|et\s+al|vs|art|sr|sra|v\.g)\.",
+    r"\b(?:ex|i\.e|e\.g|dr|dra|prof|profa|et\s+al|vs|art|sr|sra|v\.g|p|pp|vol|cap|ed|seç|sec|n|no|fig)\.",
     re.IGNORECASE,
 )
 RE_DECIMAL_POINTS = re.compile(r"(?<=\d)\.(?=\d)")
@@ -220,7 +220,7 @@ def count_sentences(paragraph: str) -> int:
     cleaned = RE_DECIMAL_POINTS.sub(",", cleaned)
     cleaned = RE_ELLIPSES.sub(" ", cleaned)
 
-    parts = [s.strip() for s in re.split(r"[.!?]+(?:\s+|$)", cleaned) if s.strip()]
+    parts = [s.strip() for s in re.split(r"[.!?]+[\"'\)\]]*(?:\s+|$)", cleaned) if s.strip()]
     return len(parts)
 
 
@@ -316,8 +316,10 @@ def validate_markdown_prose(text: str) -> ValidationResult:
             continue
 
         lines = [line.strip() for line in raw_para.splitlines() if line.strip()]
-        # Skip if all lines are markdown headings (#) or blockquotes (>)
-        if all(line.startswith("#") or line.startswith(">") for line in lines):
+        # Skip if all lines are markdown headings (#), blockquotes (>), or table rows (|)
+        if all(
+            (line.startswith("#") or line.startswith(">") or line.startswith("|")) for line in lines
+        ):
             continue
 
         sentence_count = count_sentences(raw_para)
