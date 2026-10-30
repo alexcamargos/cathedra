@@ -115,11 +115,18 @@ def apply_audit_remediations(
     has_unresolved_blockers = False
 
     for item in audit_items:
+        # Build flexible regex for quote to handle whitespace and newline differences
+        quote_words = [re.escape(w) for w in item.quote.split()]
+        flex_pattern = re.compile(r"\s+".join(quote_words)) if quote_words else None
+
         # Check for unsupported claims (S4)
         if item.verdict == "unsupported" or item.severity == "S4":
             if item.quote in audited_text:
                 pattern = re.escape(item.quote)
                 audited_text = re.sub(rf"\s*{pattern}\s*", " ", audited_text)
+                removed_count += 1
+            elif flex_pattern and flex_pattern.search(audited_text):
+                audited_text = flex_pattern.sub(" ", audited_text)
                 removed_count += 1
             continue
 
@@ -130,9 +137,18 @@ def apply_audit_remediations(
             "S3",
             "S5",
         ):
-            if item.proposed_fix and item.quote in audited_text:
-                audited_text = audited_text.replace(item.quote, item.proposed_fix)
-            elif item.severity in ("S1", "S3", "S5"):
+            if item.proposed_fix:
+                if item.quote in audited_text:
+                    audited_text = audited_text.replace(item.quote, item.proposed_fix)
+                elif flex_pattern and flex_pattern.search(audited_text):
+                    audited_text = flex_pattern.sub(item.proposed_fix, audited_text, count=1)
+                elif item.verdict in ("false", "misleading") or item.severity in (
+                    "S1",
+                    "S3",
+                    "S5",
+                ):
+                    has_unresolved_blockers = True
+            elif item.verdict in ("false", "misleading") or item.severity in ("S1", "S3", "S5"):
                 # Critical factual error or logic fallacy without fix is a blocker
                 has_unresolved_blockers = True
 

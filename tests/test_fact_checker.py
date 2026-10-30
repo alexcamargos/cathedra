@@ -332,3 +332,71 @@ def test_fact_check_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) 
     assert updated_state.audited_markdown is not None
     assert "dragões" not in updated_state.audited_markdown
     assert "O VPL desconta fluxos" in updated_state.audited_markdown
+
+
+def test_apply_audit_remediations_resilient_whitespace() -> None:
+    """Tests that quote matching handles whitespace differences and newlines gracefully.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = (
+        "O método do VPL analisa fluxos de caixa.\n"
+        "Em 1920, Isaac Newton inventou o cálculo\n"
+        "do WACC durante seu exílio acadêmico.\n"
+        "A tomada de decisão considera o custo de capital."
+    )
+    # The LLM quote has single spaces where raw_text had newlines
+    unsupported_claim = ClaimAuditItem(
+        claim_id="claim-ws",
+        quote="Em 1920, Isaac Newton inventou o cálculo do WACC durante seu exílio acadêmico.",
+        category="attribution",
+        verdict="unsupported",
+        severity="S4",
+    )
+
+    audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[unsupported_claim],
+    )
+
+    assert removed_count == 1
+    assert passed is True
+    assert "Isaac Newton" not in audited_text
+    assert "O método do VPL analisa fluxos de caixa." in audited_text
+
+
+def test_apply_audit_remediations_false_without_fix_triggers_blocker() -> None:
+    """Tests that any false verdict without proposed_fix causes audit to fail.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = "O VPL negativo indica que o projeto deve ser aprovado imediatamente."
+    false_unfixed_claim = ClaimAuditItem(
+        claim_id="claim-false",
+        quote="O VPL negativo indica que o projeto deve ser aprovado imediatamente.",
+        category="technical",
+        verdict="false",
+        severity="S2",  # Severity is S2, but verdict is false without proposed_fix
+        proposed_fix=None,
+    )
+
+    _audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[false_unfixed_claim],
+    )
+
+    assert passed is False
