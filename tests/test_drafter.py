@@ -19,6 +19,7 @@ from mba_wiki.schemas import (
     DraftResult,
     LessonPipelineState,
     SlideChunk,
+    StructuredSyllabus,
     SyllabusModule,
 )
 from tests.conftest import FakeLLMClient
@@ -224,6 +225,73 @@ def test_draft_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) -> No
     assert updated_state.extracted_zettels[0].slug == "custo-de-oportunidade"
 
 
+def test_draft_node_propagates_cross_links_and_tensions(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that draft_node populates cross_links and detected_tensions on LessonPipelineState.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+
+    syllabus = SyllabusModule(
+        discipline_slug="operacoes",
+        discipline_name="Gestão de Operações",
+        syllabus_summary="Resumo de operações.",
+        topics=["JIT"],
+        bibliography=["Livro"],
+    )
+    slides = [SlideChunk(slide_number=1, title="JIT", raw_text="Just-in-Time.")]
+    state = LessonPipelineState(
+        discipline_slug="operacoes",
+        discipline_name="Gestão de Operações",
+        lesson_number=1,
+        lesson_title="Just-in-Time",
+        lesson_slug="jit",
+        source_slide_filename="aula_jit.pdf",
+        slides=slides,
+        syllabus=syllabus,
+    )
+
+    link = CrossDisciplineLink(
+        target_discipline_slug="financas",
+        target_topic="Necessidade de Capital de Giro",
+        connection_type="impact",
+        description="JIT reduz estoques e minimiza a necessidade de capital de giro.",
+    )
+    tension = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência vs Resiliência",
+        pole_a_discipline="operacoes",
+        pole_a_framework="JIT",
+        pole_a_thesis="Estoque zero.",
+        pole_b_discipline="estrategia",
+        pole_b_framework="Resiliência",
+        pole_b_thesis="Estoque de segurança.",
+        tension_nature="Curto vs Longo prazo",
+        synthesis_guidelines="Dual sourcing.",
+    )
+
+    draft_result = DraftResult(
+        raw_draft="Rascunho de operações com pontes e tensões.",
+        cross_links=[link],
+        detected_tensions=[tension],
+    )
+    fake_llm_client.add_structured_response(draft_result)
+
+    updated_state = draft_node(state=state, client=fake_llm_client)
+
+    assert len(updated_state.cross_links) == 1
+    assert updated_state.cross_links[0].target_discipline_slug == "financas"
+    assert len(updated_state.detected_tensions) == 1
+    assert updated_state.detected_tensions[0].slug == "eficiencia-vs-resiliencia"
+
+
 def test_generate_draft_empty_slides_raises(fake_llm_client: FakeLLMClient) -> None:
     """Tests that attempting to generate a draft with an empty slide list raises ValueError.
 
@@ -246,3 +314,185 @@ def test_generate_draft_empty_slides_raises(fake_llm_client: FakeLLMClient) -> N
 
     with pytest.raises(ValueError, match="Cannot draft lesson with empty slide list"):
         generate_draft(slides=[], syllabus=syllabus, client=fake_llm_client)
+
+
+def test_format_drafter_user_prompt_with_full_syllabus() -> None:
+    """Tests that format_drafter_user_prompt includes the MBA curriculum summary.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    current_module = SyllabusModule(
+        discipline_slug="gestao-estrategica",
+        discipline_name="Gestão Estratégica",
+        syllabus_summary="Vantagem competitiva e posicionamento.",
+        topics=["Cinco Forças", "Recursos e Capacidades"],
+        bibliography=["Porter, M. Vantagem Competitiva."],
+    )
+    other_module = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Decisões de investimento e retorno.",
+        topics=["VPL", "WACC", "Estrutura de Capital"],
+        bibliography=["Brealey, R."],
+    )
+    full_syllabus = StructuredSyllabus(modules=[current_module, other_module])
+    slides = [
+        SlideChunk(
+            slide_number=1,
+            title="Diferenciação e Custo",
+            raw_text="Estratégias genéricas de Michael Porter.",
+        )
+    ]
+
+    prompt = format_drafter_user_prompt(
+        slides=slides,
+        syllabus=current_module,
+        full_syllabus=full_syllabus,
+        lesson_title="Estratégias Competitivas",
+    )
+
+    assert "## Visão Global do Currículo do MBA" in prompt
+    assert "Finanças Corporativas" in prompt
+    assert "VPL" in prompt
+    assert "WACC" in prompt
+    # Current module shouldn't duplicate in the external list or should be clearly delineated
+    assert "gestao-estrategica" in prompt
+
+
+def test_generate_draft_with_full_syllabus_and_tensions(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that generate_draft properly injects full_syllabus into the LLM prompt.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+
+    current_module = SyllabusModule(
+        discipline_slug="marketing-estrategico",
+        discipline_name="Marketing Estratégico",
+        syllabus_summary="Estratégia de precificação e segmentação.",
+        topics=["Precificação Baseada em Valor", "CAC e LTV"],
+        bibliography=["Kotler, P."],
+    )
+    finance_module = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Finanças corporativas.",
+        topics=["Margem de Contribuição", "Ponto de Equilíbrio"],
+        bibliography=["Brealey, R."],
+    )
+    full_syllabus = StructuredSyllabus(modules=[current_module, finance_module])
+    slides = [
+        SlideChunk(
+            slide_number=1,
+            title="Precificação por Penetração",
+            raw_text="Preço reduzido para ganho de escala inicial.",
+        )
+    ]
+
+    cross_link = CrossDisciplineLink(
+        target_discipline_slug="financas-corporativas",
+        target_topic="Margem de Contribuição",
+        connection_type="impact",
+        description="Penetração afeta temporariamente a margem de contribuição unitária.",
+    )
+    tension = DialecticalTension(
+        slug="escala-vs-rentabilidade-imediata",
+        title="Escala de Mercado vs Rentabilidade Imediata",
+        pole_a_discipline="marketing-estrategico",
+        pole_a_framework="Preço de Penetração",
+        pole_a_thesis="Maximizar base de clientes.",
+        pole_b_discipline="financas-corporativas",
+        pole_b_framework="Margem de Contribuição",
+        pole_b_thesis="Preservar margem operacional.",
+        tension_nature="Curto vs Longo Prazo",
+        synthesis_guidelines="Definir teto de subsídio por coorte.",
+    )
+
+    expected_result = DraftResult(
+        raw_draft="O modelo de precificação por penetração gera tração rápida...",
+        cross_links=[cross_link],
+        detected_tensions=[tension],
+    )
+    fake_llm_client.add_structured_response(expected_result)
+
+    result = generate_draft(
+        slides=slides,
+        syllabus=current_module,
+        full_syllabus=full_syllabus,
+        client=fake_llm_client,
+        lesson_title="Estratégias de Pricing",
+    )
+
+    assert len(result.cross_links) == 1
+    assert result.cross_links[0].target_discipline_slug == "financas-corporativas"
+    assert len(result.detected_tensions) == 1
+    assert result.detected_tensions[0].slug == "escala-vs-rentabilidade-imediata"
+
+    assert fake_llm_client.last_call is not None
+    assert "Visão Global do Currículo do MBA" in fake_llm_client.last_call.user_prompt
+
+
+def test_draft_node_passes_full_syllabus_from_state(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that draft_node transmits state.full_syllabus when available.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="operacoes",
+        discipline_name="Operações",
+        syllabus_summary="Gestão de estoques.",
+        topics=["Kanban"],
+        bibliography=["Slack"],
+    )
+    other = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Finanças.",
+        topics=["Capital de Giro"],
+        bibliography=["Assaf"],
+    )
+    full = StructuredSyllabus(modules=[syllabus, other])
+    slides = [SlideChunk(slide_number=1, title="Kanban", raw_text="Sistema puxado.")]
+
+    state = LessonPipelineState(
+        discipline_slug="operacoes",
+        discipline_name="Operações",
+        lesson_number=1,
+        lesson_title="Fluxo Puxado",
+        lesson_slug="fluxo-puxado",
+        source_slide_filename="aula.pdf",
+        slides=slides,
+        syllabus=syllabus,
+        full_syllabus=full,
+    )
+
+    draft_result = DraftResult(
+        raw_draft="Rascunho de operações.",
+    )
+    fake_llm_client.add_structured_response(draft_result)
+
+    draft_node(state=state, client=fake_llm_client)
+
+    assert fake_llm_client.last_call is not None
+    assert "Visão Global do Currículo do MBA" in fake_llm_client.last_call.user_prompt

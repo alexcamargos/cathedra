@@ -12,6 +12,7 @@ from mba_wiki.schemas import (
     DraftResult,
     LessonPipelineState,
     SlideChunk,
+    StructuredSyllabus,
     SyllabusModule,
 )
 
@@ -39,6 +40,7 @@ def get_drafter_prompt(prompt_path: Path | None = None) -> str:
 def format_drafter_user_prompt(
     slides: list[SlideChunk],
     syllabus: SyllabusModule,
+    full_syllabus: StructuredSyllabus | None = None,
     lesson_title: str | None = None,
 ) -> str:
     """Formats contextual input payload containing syllabus guidelines and slide chunks.
@@ -46,6 +48,7 @@ def format_drafter_user_prompt(
     Args:
         slides: Ordered list of slide chunks extracted from the lesson presentation.
         syllabus: Anchoring syllabus module containing scope, topics, and bibliography.
+        full_syllabus: Optional full course curriculum for cross-disciplinary insights.
         lesson_title: Optional title of the lesson theme being drafted.
 
     Returns:
@@ -75,7 +78,28 @@ def format_drafter_user_prompt(
     )
     sections.append(syllabus_context)
 
-    # 3. Slide Content Payloads
+    # 3. Global Curriculum Context (Cross-Discipline Insights)
+    if full_syllabus and full_syllabus.modules:
+        curriculum_lines: list[str] = [
+            "## Visão Global do Currículo do MBA (Conexões Interdisciplinares)\n"
+            "Abaixo estão os módulos curriculares do MBA com seus tópicos chave. "
+            "Utilize esta visão sistêmica para identificar conexões transversais "
+            "(`cross_links`) e dilemas gerenciais dialéticos (`detected_tensions`):\n"
+        ]
+        for module in full_syllabus.modules:
+            topics_summary = ", ".join(module.topics) if module.topics else "Geral"
+            prefix = (
+                "*(Disciplina Atual)* "
+                if module.discipline_slug == syllabus.discipline_slug
+                else ""
+            )
+            curriculum_lines.append(
+                f"- {prefix}**{module.discipline_name}** "
+                f"(`{module.discipline_slug}`): {topics_summary}"
+            )
+        sections.append("\n".join(curriculum_lines))
+
+    # 4. Slide Content Payloads
     slides_context_parts: list[str] = ["## Conteúdo Bruto Extraído dos Slides"]
     for chunk in slides:
         slide_header = f"### Slide {chunk.slide_number}: {chunk.title}"
@@ -102,6 +126,7 @@ def generate_draft(
     slides: list[SlideChunk],
     syllabus: SyllabusModule,
     client: StructuredLLMClient,
+    full_syllabus: StructuredSyllabus | None = None,
     lesson_title: str | None = None,
     prompt: str | None = None,
 ) -> DraftResult:
@@ -111,11 +136,12 @@ def generate_draft(
         slides: Ordered list of slide chunks to expand.
         syllabus: Anchoring syllabus module for the discipline.
         client: Implementation conforming to StructuredLLMClient protocol.
+        full_syllabus: Optional full course curriculum for cross-disciplinary insights.
         lesson_title: Optional human-readable lesson theme title.
         prompt: Optional system prompt override. Defaults to loaded drafter prompt.
 
     Returns:
-        DraftResult containing raw_draft and extracted_zettels.
+        DraftResult containing raw_draft, extracted_zettels, cross_links, and detected_tensions.
 
     Raises:
         ValueError: If slides list is empty.
@@ -128,6 +154,7 @@ def generate_draft(
     user_prompt = format_drafter_user_prompt(
         slides=slides,
         syllabus=syllabus,
+        full_syllabus=full_syllabus,
         lesson_title=lesson_title,
     )
 
@@ -146,7 +173,8 @@ def draft_node(
     """Graph node executor for the drafting stage within the lesson pipeline.
 
     Receives the current LessonPipelineState, invokes the drafting agent with the
-    state's slides and syllabus, and populates raw_draft and extracted_zettels.
+    state's slides, syllabus, and optional full_syllabus, and populates raw_draft,
+    extracted_zettels, cross_links, and detected_tensions.
 
     Args:
         state: Current pipeline state before drafting.
@@ -163,11 +191,14 @@ def draft_node(
         slides=state.slides,
         syllabus=state.syllabus,
         client=client,
+        full_syllabus=state.full_syllabus,
         lesson_title=state.lesson_title,
     )
 
     state.raw_draft = draft_result.raw_draft
     state.extracted_zettels = list(draft_result.extracted_zettels)
+    state.cross_links = list(draft_result.cross_links)
+    state.detected_tensions = list(draft_result.detected_tensions)
     return state
 
 
