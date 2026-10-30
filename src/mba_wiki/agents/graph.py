@@ -69,6 +69,7 @@ def create_initial_state(
     lesson_title: str,
     source_slide_filename: str,
     lesson_slug: str | None = None,
+    full_syllabus: StructuredSyllabus | None = None,
 ) -> LessonPipelineState:
     """Instantiates a fresh LessonPipelineState from in-memory slide chunks and syllabus.
 
@@ -79,6 +80,7 @@ def create_initial_state(
         lesson_title: Descriptive title of the lesson theme.
         source_slide_filename: Basename of the presentation file.
         lesson_slug: Optional explicit slug. Defaults to slugified lesson_title.
+        full_syllabus: Optional complete StructuredSyllabus of the MBA course.
 
     Returns:
         An initialized LessonPipelineState ready for drafting.
@@ -99,6 +101,7 @@ def create_initial_state(
         source_slide_filename=source_slide_filename,
         slides=slides,
         syllabus=syllabus,
+        full_syllabus=full_syllabus,
     )
 
 
@@ -108,6 +111,7 @@ def ingestion_node(
     lesson_number: int,
     lesson_title: str | None = None,
     lesson_slug: str | None = None,
+    full_syllabus: StructuredSyllabus | None = None,
 ) -> LessonPipelineState:
     """Ingestion graph node extracting slide chunks from disk and anchoring to syllabus.
 
@@ -117,6 +121,7 @@ def ingestion_node(
         lesson_number: Sequential lesson number.
         lesson_title: Optional descriptive title of the lesson theme (inferred if None).
         lesson_slug: Optional custom slug for the lesson.
+        full_syllabus: Optional complete StructuredSyllabus of the MBA course.
 
     Returns:
         Initial LessonPipelineState populated with parsed slide chunks and syllabus.
@@ -140,6 +145,7 @@ def ingestion_node(
         lesson_title=resolved_title,
         source_slide_filename=slide_path.name,
         lesson_slug=lesson_slug,
+        full_syllabus=full_syllabus,
     )
 
 
@@ -174,6 +180,8 @@ def finalize_output_node(
         body_markdown=final_body,
         extracted_zettels=state.extracted_zettels,
         audit_items=state.audit_items,
+        cross_links=state.cross_links,
+        detected_tensions=state.detected_tensions,
     )
     state.output = output
     return state

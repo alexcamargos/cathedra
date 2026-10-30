@@ -302,6 +302,8 @@ def test_run_lesson_pipeline_end_to_end_success(
     assert output.extracted_zettels[0].slug == "valor-presente-liquido"
     assert len(output.audit_items) == 1
     assert output.audit_items[0].claim_id == "CLM-001"
+    assert output.cross_links == []
+    assert output.detected_tensions == []
 
     # Verify that initial_state was updated and output attribute is assigned
     assert initial_state.output is output
@@ -487,3 +489,102 @@ def test_ingestion_node_infers_title_when_omitted(
     )
     assert "Finanças Corporativas" in state.lesson_title
     assert state.lesson_slug != ""
+
+
+def test_ingestion_node_with_full_syllabus(
+    synthetic_graph_pdf_path: Path,
+    sample_syllabus_module: SyllabusModule,
+) -> None:
+    """Tests that ingestion_node accepts and stores full_syllabus on pipeline state.
+
+    Args:
+        synthetic_graph_pdf_path: Path to synthetic presentation PDF fixture.
+        sample_syllabus_module: Sample syllabus module fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    full_syllabus = StructuredSyllabus(modules=[sample_syllabus_module])
+    state = ingestion_node(
+        slide_path=synthetic_graph_pdf_path,
+        syllabus=sample_syllabus_module,
+        full_syllabus=full_syllabus,
+        lesson_number=1,
+    )
+    assert state.full_syllabus is not None
+    assert len(state.full_syllabus.modules) == 1
+    assert state.full_syllabus.modules[0].discipline_slug == "financas-corporativas"
+
+
+def test_run_lesson_pipeline_propagates_tensions_to_output(
+    sample_syllabus_module: SyllabusModule,
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that tensions and cross-links generated during drafting reach WikiLessonOutput.
+
+    Args:
+        sample_syllabus_module: Sample syllabus module fixture.
+        fake_llm_client: Fake LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+
+    slide = SlideChunk(
+        slide_number=1,
+        title="VPL e Payback",
+        raw_text="Critérios de investimento.",
+    )
+    pipeline_state = create_initial_state(
+        slides=[slide],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="Critérios de Investimento",
+        source_slide_filename="aula_01.pdf",
+    )
+
+    link = CrossDisciplineLink(
+        target_discipline_slug="estrategia",
+        target_topic="Vantagem Competitiva",
+        connection_type="synergy",
+        description="Alinhamento entre VPL e vantagem sustentável.",
+    )
+    tension = DialecticalTension(
+        slug="vpl-vs-payback",
+        title="VPL vs Payback",
+        pole_a_discipline="financas",
+        pole_a_framework="VPL",
+        pole_a_thesis="Maximizar valor econômico a longo prazo.",
+        pole_b_discipline="financas",
+        pole_b_framework="Payback",
+        pole_b_thesis="Recuperação rápida de liquidez no curto prazo.",
+        tension_nature="Valor vs Liquidez",
+        synthesis_guidelines="Usar VPL como corte e payback como filtro de risco de liquidez.",
+    )
+
+    draft_result = DraftResult(
+        raw_draft="O método do VPL orienta a alocação ótima de capital.",
+        cross_links=[link],
+        detected_tensions=[tension],
+    )
+    fake_llm_client.add_structured_response(draft_result)
+
+    audit_response = AuditClaimsResponse(claims=[])
+    fake_llm_client.add_structured_response(audit_response)
+
+    clean_humanized = "O método do VPL orienta a alocação ótima de capital."
+    fake_llm_client.add_text_response(clean_humanized)
+
+    output = run_lesson_pipeline(state=pipeline_state, client=fake_llm_client)
+
+    assert len(output.cross_links) == 1
+    assert output.cross_links[0].target_discipline_slug == "estrategia"
+    assert len(output.detected_tensions) == 1
+    assert output.detected_tensions[0].slug == "vpl-vs-payback"
