@@ -400,3 +400,136 @@ def test_apply_audit_remediations_false_without_fix_triggers_blocker() -> None:
     )
 
     assert passed is False
+
+
+def test_apply_audit_remediations_unsupported_s4_not_found_triggers_blocker() -> None:
+    """Tests that an unsupported S4 claim whose quote cannot be found triggers a blocker.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = "O fluxo de caixa livre da firma é descontado pelo custo médio ponderado."
+    unmatched_s4 = ClaimAuditItem(
+        claim_id="claim-ghost-s4",
+        quote="Frase inexistente sobre dragões e alquimia financeira que não está no texto.",
+        category="technical",
+        verdict="unsupported",
+        severity="S4",
+        proposed_fix=None,
+    )
+
+    _audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[unmatched_s4],
+    )
+
+    assert removed_count == 0
+    assert passed is False
+
+
+def test_apply_audit_remediations_imprecise_s2_not_found_triggers_blocker() -> None:
+    """Tests that an imprecise S2 claim whose fix cannot be applied triggers a blocker.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = "O CAPM estima o retorno esperado com base no beta do ativo."
+    unmatched_s2 = ClaimAuditItem(
+        claim_id="claim-ghost-s2",
+        quote="Taxa Selic era de 45% ao mês em 2024.",
+        category="metric",
+        verdict="imprecise",
+        severity="S2",
+        proposed_fix="Taxa Selic média foi de 10,5% ao ano em 2024.",
+    )
+
+    _audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[unmatched_s2],
+    )
+
+    assert removed_count == 0
+    assert passed is False
+
+
+def test_apply_audit_remediations_punctuation_tolerant_matching_s4() -> None:
+    """Tests that S4 claims with minor punctuation/quote differences are successfully pruned.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = (
+        "A análise de sensibilidade testa múltiplos cenários. "
+        'Segundo o livro "Finanças Mágicas", o ROI é sempre infinito! '
+        "O custo de capital próprio deve refletir o risco sistemático."
+    )
+    # The quote omits the exclamation mark and uses different quotes
+    tolerant_s4 = ClaimAuditItem(
+        claim_id="claim-tolerant-s4",
+        quote="Segundo o livro “Finanças Mágicas”, o ROI é sempre infinito",
+        category="attribution",
+        verdict="unsupported",
+        severity="S4",
+        proposed_fix=None,
+    )
+
+    audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[tolerant_s4],
+    )
+
+    assert removed_count == 1
+    assert passed is True
+    assert "Finanças Mágicas" not in audited_text
+    assert "A análise de sensibilidade testa múltiplos cenários." in audited_text
+
+
+def test_apply_audit_remediations_punctuation_tolerant_matching_proposed_fix() -> None:
+    """Tests that imprecise S2 claims with punctuation differences get fixed correctly.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = "A margem EBITDA da empresa no período fiscal foi de 32,5%."
+    # The LLM quote omitted the trailing dot
+    imprecise_claim = ClaimAuditItem(
+        claim_id="claim-tolerant-s2",
+        quote="A margem EBITDA da empresa no período fiscal foi de 32,5%",
+        category="metric",
+        verdict="imprecise",
+        severity="S2",
+        proposed_fix="A margem EBITDA da empresa no período fiscal foi de 28,4%",
+    )
+
+    audited_text, removed_count, passed = apply_audit_remediations(
+        raw_text=raw_text,
+        audit_items=[imprecise_claim],
+    )
+
+    assert passed is True
+    assert "28,4%" in audited_text
+    assert "32,5%" not in audited_text

@@ -90,6 +90,87 @@ def format_fact_checker_user_prompt(
     return "\n\n".join(sections)
 
 
+def normalize_claim_punctuation(text: str) -> str:
+    """Normalizes quotation marks and punctuation variants for resilient matching.
+
+    Args:
+        text: Input text string.
+
+    Returns:
+        Normalized text with standardized quotes and dashes.
+
+    Raises:
+        None.
+    """
+    normalized = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    return normalized.replace("—", "-").replace("–", "-")
+
+
+def locate_and_apply_remediation(
+    text: str,
+    quote: str,
+    replacement: str | None = None,
+) -> tuple[str, bool]:
+    """Locates a cited quote in draft text and removes or substitutes it reliably.
+
+    Attempts exact match, whitespace/newline flexible match, and punctuation-tolerant
+    normalized regex match. If replacement is None, removes the matched segment
+    along with surrounding extra whitespace. If replacement is a string, substitutes
+    the matched segment with the replacement string.
+
+    Args:
+        text: The draft prose being remediated.
+        quote: The exact or slightly varied sentence/claim cited by the auditor LLM.
+        replacement: String to replace the quote with, or None to prune/delete it.
+
+    Returns:
+        Tuple of (remediated_text, success_flag).
+
+    Raises:
+        None.
+    """
+    clean_quote = quote.strip()
+    if not clean_quote:
+        return text, False
+
+    # 1. Exact string match
+    if clean_quote in text:
+        if replacement is None:
+            pattern = re.escape(clean_quote)
+            result = re.sub(rf"\s*{pattern}\s*", " ", text, count=1)
+            return result, True
+        return text.replace(clean_quote, replacement, 1), True
+
+    # 2. Whitespace and newline flexible regex match
+    quote_words = [re.escape(w) for w in clean_quote.split()]
+    if quote_words:
+        flex_pattern = re.compile(r"\s+".join(quote_words))
+        if flex_pattern.search(text):
+            if replacement is None:
+                result = flex_pattern.sub(" ", text, count=1)
+                return result, True
+            return flex_pattern.sub(replacement, text, count=1), True
+
+    # 3. Punctuation and quote-normalized tolerant match
+    norm_quote = normalize_claim_punctuation(clean_quote)
+    norm_tokens = [
+        re.escape(t.strip(".,;:?!\"'")) for t in norm_quote.split() if t.strip(".,;:?!\"'")
+    ]
+    if norm_tokens:
+        token_pattern = re.compile(
+            r"\b" + r"[\s\.,;:?!\"'“”‘’—–-]+".join(norm_tokens) + r"[!?:;.]?"
+        )
+        match = token_pattern.search(text)
+        if match:
+            start, end = match.span()
+            if replacement is None:
+                result = text[:start] + " " + text[end:]
+                return result, True
+            return text[:start] + replacement + text[end:], True
+
+    return text, False
+
+
 def apply_audit_remediations(
     raw_text: str,
     audit_items: list[ClaimAuditItem],
@@ -97,8 +178,9 @@ def apply_audit_remediations(
     """Applies factual corrections and prunes unsupported claims from draft text.
 
     For unsupported claims (S4), removes the quote from the text and tracks count.
-    For false or imprecise claims (S1, S2) with proposed_fix, replaces quote with fix.
-    Determines whether the text passed factual verification without blocking issues.
+    If an unsupported claim cannot be located, flags has_unresolved_blockers to prevent
+    silent bypass. For false or imprecise claims (S1, S2) with proposed_fix, replaces
+    quote with fix. If a proposed fix cannot be located and applied, flags as blocker.
 
     Args:
         raw_text: Original preliminary draft text.
@@ -115,19 +197,18 @@ def apply_audit_remediations(
     has_unresolved_blockers = False
 
     for item in audit_items:
-        # Build flexible regex for quote to handle whitespace and newline differences
-        quote_words = [re.escape(w) for w in item.quote.split()]
-        flex_pattern = re.compile(r"\s+".join(quote_words)) if quote_words else None
-
         # Check for unsupported claims (S4)
         if item.verdict == "unsupported" or item.severity == "S4":
-            if item.quote in audited_text:
-                pattern = re.escape(item.quote)
-                audited_text = re.sub(rf"\s*{pattern}\s*", " ", audited_text)
+            new_text, matched = locate_and_apply_remediation(
+                text=audited_text,
+                quote=item.quote,
+                replacement=None,
+            )
+            if matched:
+                audited_text = new_text
                 removed_count += 1
-            elif flex_pattern and flex_pattern.search(audited_text):
-                audited_text = flex_pattern.sub(" ", audited_text)
-                removed_count += 1
+            else:
+                has_unresolved_blockers = True
             continue
 
         # Check for false, imprecise, or misleading claims
@@ -138,18 +219,20 @@ def apply_audit_remediations(
             "S5",
         ):
             if item.proposed_fix:
-                if item.quote in audited_text:
-                    audited_text = audited_text.replace(item.quote, item.proposed_fix)
-                elif flex_pattern and flex_pattern.search(audited_text):
-                    audited_text = flex_pattern.sub(item.proposed_fix, audited_text, count=1)
-                elif item.verdict in ("false", "misleading") or item.severity in (
-                    "S1",
-                    "S3",
-                    "S5",
-                ):
+                new_text, matched = locate_and_apply_remediation(
+                    text=audited_text,
+                    quote=item.quote,
+                    replacement=item.proposed_fix,
+                )
+                if matched:
+                    audited_text = new_text
+                else:
                     has_unresolved_blockers = True
             elif item.verdict in ("false", "misleading") or item.severity in ("S1", "S3", "S5"):
                 # Critical factual error or logic fallacy without fix is a blocker
+                has_unresolved_blockers = True
+            elif item.verdict == "imprecise" or item.severity == "S2":
+                # Imprecise claim without fix is an unresolved issue
                 has_unresolved_blockers = True
 
     # Normalize whitespace and spacing before punctuation
@@ -250,4 +333,6 @@ __all__ = [
     "fact_check_node",
     "format_fact_checker_user_prompt",
     "get_fact_checker_prompt",
+    "locate_and_apply_remediation",
+    "normalize_claim_punctuation",
 ]

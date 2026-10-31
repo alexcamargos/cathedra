@@ -104,7 +104,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 ---
 
 ## Etapa 17: Blindagem deterministica de exclusao e correcao factual no Fact-Checker
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Blindar `apply_audit_remediations` em `src/mba_wiki/agents/fact_checker.py`: (1) garantir que afirmacoes `unsupported` (`S4`) e correcoes `S2` que nao foram localizadas e substituidas no texto marquem `has_unresolved_blockers = True`; (2) implementar casamento difuso/normalizado de sentencas para tolerar pequenas variacoes de citacao da LLM sem deixar alucinacoes passarem.
 - **Arquivos afetados:** `src/mba_wiki/agents/fact_checker.py`, `tests/test_fact_checker.py`.
 - **Criterio de aceite:** Testes unitarios cobrindo citacoes com pequenas variacoes e assercoes de bloqueio passando com `uv run pytest tests/test_fact_checker.py`, `uv run ruff check .` e `uv run mypy src/`.
