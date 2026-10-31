@@ -116,7 +116,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes ponta a ponta garantindo que zettels/tensoes com alucinacoes nao cheguem a `WikiLessonOutput` passando com `uv run pytest tests/test_fact_checker.py tests/test_graph.py`, `uv run ruff check .` e `uv run mypy src/`.
 
 ## Etapa 19: Migracao do transporte do AGYCLIClient para stdin e mitigacao de limite no Windows
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Refatorar `AGYCLIClient._execute_cli` em `src/mba_wiki/agents/llm_client.py` para alimentar o processo via `stdin` (pipe UTF-8) ou arquivo temporario em `scratch/` quando o prompt for volumoso, contornando o limite de 32 KB da API Win32. Implementar extracao resiliente do JSON via busca do envelope delimitador `{...}`.
 - **Arquivos afetados:** `src/mba_wiki/agents/llm_client.py`, `tests/test_agy_client.py`.
 - **Criterio de aceite:** Testes unitarios simulando prompts extensos e outputs com logs preliminares passando com `uv run pytest tests/test_agy_client.py`, `uv run ruff check .` e `uv run mypy src/`.

@@ -260,3 +260,79 @@ def test_create_llm_client_factory_backend_selection(
     monkeypatch.setenv("GEMINI_API_KEY", "test_key")
     client_gemini = create_llm_client(backend="gemini")
     assert isinstance(client_gemini, GeminiRESTClient)
+
+
+def test_agy_cli_client_large_prompt_uses_stdin_pipe(mocker: MockerFixture) -> None:
+    """Tests that large prompts (>4000 chars) are piped via stdin to prevent Win32 overflow.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_run = mocker.patch("subprocess.run")
+    mock_run.return_value = mocker.MagicMock(
+        returncode=0,
+        stdout="Análise detalhada concluída com sucesso.",
+        stderr="",
+    )
+
+    client = AGYCLIClient()
+    large_prompt = "A" * 5000
+    result = client.generate_text(
+        system_prompt="Sistema",
+        user_prompt=large_prompt,
+    )
+
+    assert result == "Análise detalhada concluída com sucesso."
+    mock_run.assert_called_once()
+    call_args, call_kwargs = mock_run.call_args
+    cmd = call_args[0]
+    assert cmd[0] == "agy"
+    # Ensure input was piped via stdin keyword argument
+    assert "input" in call_kwargs
+    assert len(call_kwargs["input"]) > 5000
+
+
+def test_agy_cli_client_resilient_json_extraction_with_logs_and_fences(
+    mocker: MockerFixture,
+) -> None:
+    """Tests that generate_structured parses JSON even when surrounded by logs and fences.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_run = mocker.patch("subprocess.run")
+    noisy_output = (
+        "[INFO] Extension 'auth' initialized successfully.\n"
+        "[DEBUG] Model gemini-2.5-pro loaded with 0.2 temperature.\n"
+        "```json\n"
+        '{\n  "topic": "Estrutura de Capital Avançada",\n  "score": 9.9\n}\n'
+        "```\n"
+        "[INFO] Execution completed in 1.2s.\n"
+    )
+    mock_run.return_value = mocker.MagicMock(
+        returncode=0,
+        stdout=noisy_output,
+        stderr="",
+    )
+
+    client = AGYCLIClient()
+    result = client.generate_structured(
+        system_prompt="Instruções",
+        user_prompt="Entrada",
+        response_model=SampleOutputModel,
+    )
+
+    assert result.topic == "Estrutura de Capital Avançada"
+    assert result.score == 9.9

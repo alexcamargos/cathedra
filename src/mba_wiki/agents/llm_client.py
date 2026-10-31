@@ -9,12 +9,56 @@ import json
 import os
 import re
 import subprocess
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import httpx
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def extract_json_payload(raw_output: str) -> str:
+    """Extracts JSON payload from raw LLM or CLI output.
+
+    Handles outer markdown fences, log preambles, and conversational postambles
+    by locating the balanced outermost '{...}' or '[...]' envelope.
+
+    Args:
+        raw_output: Raw string returned from LLM execution.
+
+    Returns:
+        Clean JSON substring ready for model validation.
+
+    Raises:
+        None.
+    """
+    stripped = raw_output.strip()
+
+    # 1. Try stripping outer markdown code fences if wrapped
+    if stripped.startswith("```"):
+        fenced = re.sub(r"^```(?:json)?\s*", "", stripped)
+        fenced = re.sub(r"\s*```$", "", fenced).strip()
+        stripped = fenced
+
+    # 2. Check if already clean JSON
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
+        return stripped
+
+    # 3. Locate outermost balanced '{' and '}'
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return stripped[first_brace : last_brace + 1].strip()
+
+    # 4. Locate outermost balanced '[' and ']'
+    first_bracket = stripped.find("[")
+    last_bracket = stripped.rfind("]")
+    if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+        return stripped[first_bracket : last_bracket + 1].strip()
+
+    return stripped
 
 
 @runtime_checkable
@@ -151,10 +195,7 @@ class GeminiRESTClient:
 
         parts = candidates[0].get("content", {}).get("parts") or [{}]
         raw_json = parts[0].get("text", "{}")
-        clean_json = raw_json.strip()
-        if clean_json.startswith("```"):
-            clean_json = re.sub(r"^```(?:json)?\s*", "", clean_json)
-            clean_json = re.sub(r"\s*```$", "", clean_json)
+        clean_json = extract_json_payload(raw_json)
         return response_model.model_validate_json(clean_json)
 
     def generate_text(
@@ -238,6 +279,9 @@ class AGYCLIClient:
     def _execute_cli(self, prompt: str) -> str:
         """Executes AGY CLI command in non-interactive print mode with prompt input.
 
+        For large prompts (>4000 characters), passes prompt content via standard input
+        to prevent command line argument length limitations (Win32 32KB ceiling).
+
         Args:
             prompt: Formatted prompt string passed to the CLI.
 
@@ -248,22 +292,37 @@ class AGYCLIClient:
             RuntimeError: If binary is not found or execution returns a non-zero exit code.
             TimeoutError: If execution exceeds the configured timeout threshold.
         """
-        cmd = [
-            self.executable,
-            "-p",
-            prompt,
-            "--model",
-            self.model,
-        ]
+        run_kwargs: dict[str, Any] = {
+            "capture_output": True,
+            "text": True,
+            "check": True,
+            "timeout": self.timeout,
+        }
+
+        if len(prompt) > 4000:
+            cmd = [
+                self.executable,
+                "-p",
+                "-",
+                "--model",
+                self.model,
+            ]
+            run_kwargs["input"] = prompt
+        else:
+            cmd = [
+                self.executable,
+                "-p",
+                prompt,
+                "--model",
+                self.model,
+            ]
+
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=self.timeout,
+                **run_kwargs,
             )
-            return result.stdout.strip()
+            return str(result.stdout).strip()
         except FileNotFoundError as exc:
             raise RuntimeError(
                 f"AGY CLI binary not found at '{self.executable}'. "
@@ -341,11 +400,7 @@ class AGYCLIClient:
         )
 
         raw_output = self._execute_cli(combined_prompt)
-        clean_json = raw_output.strip()
-        if clean_json.startswith("```"):
-            clean_json = re.sub(r"^```(?:json)?\s*", "", clean_json)
-            clean_json = re.sub(r"\s*```$", "", clean_json)
-
+        clean_json = extract_json_payload(raw_output)
         return response_model.model_validate_json(clean_json)
 
 
@@ -392,4 +447,5 @@ __all__ = [
     "GeminiRESTClient",
     "StructuredLLMClient",
     "create_llm_client",
+    "extract_json_payload",
 ]
