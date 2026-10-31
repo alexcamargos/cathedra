@@ -891,3 +891,125 @@ def test_export_lesson_to_vault_with_tensions(
     assert result.tensions_index_path.name == "_Indice_Tensoes.md"
     assert result.tension_paths[0].is_file()
     assert result.tensions_index_path.is_file()
+
+
+def test_write_discipline_index_force_auto_heals_missing_delimiters(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_discipline_index auto-recovers missing delimiters when force=True.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_syllabus: Sample syllabus module fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    discipline_dir = tmp_path / "01_Wiki_Disciplinas" / sample_syllabus.discipline_slug
+    discipline_dir.mkdir(parents=True, exist_ok=True)
+    index_path = discipline_dir / "_Indice_Materia.md"
+    # File without AUTO-LESSONS delimiters
+    index_path.write_text(
+        "# Finanças Corporativas\n\nMinha anotação manual sobrevivente.",
+        encoding="utf-8",
+    )
+
+    updated_path = write_discipline_index(
+        vault_root=tmp_path,
+        syllabus=sample_syllabus,
+        output=sample_lesson_output,
+        force=True,
+    )
+    content = updated_path.read_text(encoding="utf-8")
+    assert "<!-- AUTO-LESSONS:START -->" in content
+    assert "<!-- AUTO-LESSONS:END -->" in content
+    assert "Aula 01: Critérios de Decisão de Investimento" in content
+    assert "Minha anotação manual sobrevivente." in content
+
+
+def test_write_lesson_page_force_auto_heals_missing_delimiters_and_preserves_notes(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_lesson_page auto-heals corrupted delimiters and preserves manual notes.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    discipline_dir = tmp_path / "01_Wiki_Disciplinas" / sample_lesson_output.discipline_slug
+    discipline_dir.mkdir(parents=True, exist_ok=True)
+    lesson_path = (
+        discipline_dir
+        / f"Aula_{sample_lesson_output.lesson_number:02d}_{sample_lesson_output.lesson_slug}.md"
+    )
+    # File where AUTO-CONTENT delimiters were deleted, but personal notes exist
+    corrupted_content = (
+        "# Aula 01: Critérios\n\n"
+        "Texto antigo sem delimitadores.\n\n"
+        "## Notas Pessoais de Aula\n"
+        "Minhas anotações particulares de alto valor.\n"
+    )
+    lesson_path.write_text(corrupted_content, encoding="utf-8")
+
+    updated_path = write_lesson_page(
+        vault_root=tmp_path,
+        output=sample_lesson_output,
+        force=True,
+    )
+    content = updated_path.read_text(encoding="utf-8")
+    assert "<!-- AUTO-CONTENT:START -->" in content
+    assert "<!-- AUTO-CONTENT:END -->" in content
+    assert sample_lesson_output.body_markdown.strip() in content
+    assert "Minhas anotações particulares de alto valor." in content
+
+
+def test_write_atomic_zettel_force_auto_heals_missing_delimiters(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Tests that write_atomic_zettel auto-heals missing AUTO-BACKLINKS delimiters when force=True.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        sample_lesson_output: Sample lesson output fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = sample_lesson_output.extracted_zettels[0]
+    zettel_dir = tmp_path / "02_Zettelkasten"
+    zettel_dir.mkdir(parents=True, exist_ok=True)
+    zettel_path = zettel_dir / f"{zettel.slug}.md"
+    corrupted_content = (
+        "---\ntype: zettel\nslug: valor-presente-liquido\n---\n\n"
+        "# VPL\n\nConceito intacto sem delimitadores de backlinks.\n"
+    )
+    zettel_path.write_text(corrupted_content, encoding="utf-8")
+
+    updated_path = write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=zettel,
+        output=sample_lesson_output,
+        force=True,
+    )
+    content = updated_path.read_text(encoding="utf-8")
+    assert "<!-- AUTO-BACKLINKS:START -->" in content
+    assert "<!-- AUTO-BACKLINKS:END -->" in content
+    assert "Aula_01_criterios-decisao" in content
+    assert "Conceito intacto sem delimitadores de backlinks." in content

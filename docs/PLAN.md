@@ -128,7 +128,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes validando preservacao de blocos de codigo e reducao de retentativas passando com `uv run pytest tests/test_humanizer.py`, `uv run ruff check .` e `uv run mypy src/`.
 
 ## Etapa 21: Roteamento de modelo de auditoria na CLI e auto-recuperacao de delimitadores no Obsidian
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Atualizar `src/mba_wiki/cli.py` para honrar `llm_model_auditor` injetando cliente com modelo especializado no auditor. Adicionar a flag `--force` na CLI e rotina de auto-reparo de delimitadores em `src/mba_wiki/exporters/obsidian_writer.py` para restaurar arquivos com tags corrompidas sem descartar anotacoes pessoais.
 - **Arquivos afetados:** `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_cli.py`, `tests/test_exporters.py`.
 - **Criterio de aceite:** Testes com CLI Runner e reprocessamento com delimitadores rompidos passando com `uv run pytest tests/test_cli.py tests/test_exporters.py`, `uv run ruff check .` e `uv run mypy src/`.

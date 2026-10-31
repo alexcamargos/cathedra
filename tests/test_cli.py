@@ -579,3 +579,137 @@ def test_sync_tensions_empty_vault(
     )
     assert result.exit_code == 0
     assert "Nenhuma nota de tensão encontrada" in result.output
+
+
+def test_get_client_model_routing_drafter_and_auditor(mocker: MockerFixture) -> None:
+    """Tests that get_client routes to the specialized model for drafter and auditor.
+
+    Args:
+        mocker: Pytest-mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_create = mocker.patch("mba_wiki.cli.create_llm_client")
+    mock_settings = mocker.patch("mba_wiki.cli.get_settings")
+    mock_settings.return_value.gemini_api_key = "dummy-key"
+    mock_settings.return_value.llm_backend = "gemini_rest"
+    mock_settings.return_value.llm_model_drafter = "gemini-2.5-flash"
+    mock_settings.return_value.llm_model_auditor = "gemini-2.5-pro"
+
+    # Reset override to ensure get_client reads settings
+    set_client_override(None)
+
+    # 1. Drafter routing
+    get_client(auditor=False)
+    mock_create.assert_called_with(
+        api_key="dummy-key",
+        model="gemini-2.5-flash",
+        backend="gemini_rest",
+    )
+
+    # 2. Auditor routing
+    get_client(auditor=True)
+    mock_create.assert_called_with(
+        api_key="dummy-key",
+        model="gemini-2.5-pro",
+        backend="gemini_rest",
+    )
+
+
+def test_build_lesson_with_force_recovers_corrupted_vault(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests build-lesson with --force recovers corrupted delimiters instead of crashing.
+
+    Args:
+        cli_runner: CliRunner test fixture.
+        synthetic_cli_pdf: Synthetic PDF slide file fixture.
+        tmp_path: Pytest temporary directory fixture.
+        fake_llm_client: Fake LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    vault_dir = tmp_path / "vault_force"
+    vault_dir.mkdir(parents=True, exist_ok=True)
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True, exist_ok=True)
+    syllabus_file = prog_dir / "ementa_estruturada.json"
+
+    module = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Análise de decisões de investimento.",
+        topics=["VPL"],
+        bibliography=["Livro"],
+    )
+    syllabus = StructuredSyllabus(
+        course_title="MBA Executivo",
+        institution="FGV",
+        modules=[module],
+    )
+    syllabus_file.write_text(syllabus.model_dump_json(indent=2), encoding="utf-8")
+
+    # Create an existing lesson file with corrupted delimiters
+    disc_dir = vault_dir / "01_Wiki_Disciplinas" / "financas-corporativas"
+    disc_dir.mkdir(parents=True, exist_ok=True)
+    corrupted_lesson = disc_dir / "Aula_01_criterios-decisao.md"
+    corrupted_lesson.write_text(
+        "# Aula 01\nTexto antigo.\n## Notas Pessoais de Aula\nMinha nota importante.",
+        encoding="utf-8",
+    )
+
+    fake_llm_client.add_structured_response(
+        DraftResult(
+            lesson_title="Critérios de Decisão de Investimento",
+            lesson_slug="criterios-decisao",
+            theme_intro="Introdução teórica ao VPL.",
+            expanded_sections=["O método do VPL analisa fluxos descontados."],
+            raw_draft="O método do VPL analisa fluxos descontados.",
+            extracted_zettels=[],
+            cross_links=[],
+        )
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(claims=[], overall_verdict="approved")
+    )
+    fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
+
+    set_client_override(fake_llm_client)
+    try:
+        # Run with --force / -f
+        result = cli_runner.invoke(
+            app,
+            [
+                "build-lesson",
+                str(synthetic_cli_pdf),
+                "--discipline",
+                "financas-corporativas",
+                "--lesson",
+                "1",
+                "--title",
+                "Critérios de Decisão de Investimento",
+                "--slug",
+                "criterios-decisao",
+                "--vault",
+                str(vault_dir),
+                "--force",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Aula 01 processada com sucesso" in result.stdout
+        content = corrupted_lesson.read_text(encoding="utf-8")
+        assert "<!-- AUTO-CONTENT:START -->" in content
+        assert "Minha nota importante." in content
+    finally:
+        set_client_override(None)

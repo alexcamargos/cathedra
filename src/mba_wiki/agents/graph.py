@@ -190,6 +190,7 @@ def finalize_output_node(
 def execute_pipeline(
     state: LessonPipelineState,
     client: StructuredLLMClient,
+    auditor_client: StructuredLLMClient | None = None,
     processed_date: date | None = None,
     humanizer_max_attempts: int = 3,
 ) -> LessonPipelineState:
@@ -201,6 +202,7 @@ def execute_pipeline(
     Args:
         state: Initial LessonPipelineState with slides and syllabus.
         client: Structured LLM client implementation conforming to protocol.
+        auditor_client: Optional specialized StructuredLLMClient for the factual auditor.
         processed_date: Optional execution date for output stamping.
         humanizer_max_attempts: Maximum permitted retry attempts for stylistic linter.
 
@@ -215,7 +217,7 @@ def execute_pipeline(
     state = draft_node(state=state, client=client)
 
     # 2. Auditoria Factual Adversarial
-    state = fact_check_node(state=state, client=client)
+    state = fact_check_node(state=state, client=auditor_client or client)
 
     # 3. Polimento Estilístico com Validação e Retentativa
     state = humanize_node(state=state, client=client, max_attempts=humanizer_max_attempts)
@@ -229,6 +231,7 @@ def execute_pipeline(
 def run_lesson_pipeline(
     state: LessonPipelineState,
     client: StructuredLLMClient,
+    auditor_client: StructuredLLMClient | None = None,
     processed_date: date | None = None,
     humanizer_max_attempts: int = 3,
 ) -> WikiLessonOutput:
@@ -237,6 +240,7 @@ def run_lesson_pipeline(
     Args:
         state: Initial LessonPipelineState with slides and syllabus.
         client: Structured LLM client implementation.
+        auditor_client: Optional specialized StructuredLLMClient for the factual auditor.
         processed_date: Optional processing date. Defaults to date.today().
         humanizer_max_attempts: Maximum retry count for humanizer convergence.
 
@@ -250,13 +254,12 @@ def run_lesson_pipeline(
     final_state = execute_pipeline(
         state=state,
         client=client,
+        auditor_client=auditor_client,
         processed_date=processed_date,
         humanizer_max_attempts=humanizer_max_attempts,
     )
-
     if final_state.output is None:
-        raise RuntimeError("Pipeline completed but WikiLessonOutput was not generated.")
-
+        raise RuntimeError("Pipeline completed execution but failed to produce WikiLessonOutput.")
     return final_state.output
 
 

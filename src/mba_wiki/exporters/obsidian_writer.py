@@ -71,6 +71,7 @@ def write_discipline_index(
     vault_root: Path,
     syllabus: SyllabusModule,
     output: WikiLessonOutput,
+    force: bool = False,
 ) -> Path:
     """Generates or updates the discipline index MOC (_Indice_Materia.md) idempotently.
 
@@ -81,12 +82,13 @@ def write_discipline_index(
         vault_root: Root directory of the target Obsidian Vault.
         syllabus: Anchoring SyllabusModule providing discipline metadata.
         output: Processed WikiLessonOutput with current lesson details.
+        force: Whether to auto-recover missing delimiters instead of raising ValueError.
 
     Returns:
         Path to the written or updated _Indice_Materia.md file.
 
     Raises:
-        ValueError: If delimiters are missing in an existing index file.
+        ValueError: If delimiters are missing in an existing index file and force=False.
     """
     discipline_dir = vault_root / "01_Wiki_Disciplinas" / syllabus.discipline_slug
     discipline_dir.mkdir(parents=True, exist_ok=True)
@@ -127,9 +129,26 @@ def write_discipline_index(
     end_idx = existing_content.find(AUTO_LESSONS_END)
 
     if start_idx == -1 or end_idx == -1:
-        raise ValueError(
-            f"Delimiters '{AUTO_LESSONS_START}' and '{AUTO_LESSONS_END}' not found in {index_path}"
-        )
+        if not force:
+            raise ValueError(
+                f"Delimiters '{AUTO_LESSONS_START}' and '{AUTO_LESSONS_END}' "
+                f"not found in {index_path}"
+            )
+        # Auto-heal: Recreate delimiters while preserving manual content
+        if "## Aulas Processadas" in existing_content:
+            pattern = re.compile(r"## Aulas Processadas.*?(?=\n## |\Z)", re.DOTALL)
+            healed = (
+                f"## Aulas Processadas\n{AUTO_LESSONS_START}\n{lesson_entry}\n{AUTO_LESSONS_END}\n"
+            )
+            updated_content = pattern.sub(healed, existing_content)
+        else:
+            updated_content = (
+                existing_content.rstrip()
+                + f"\n\n## Aulas Processadas\n{AUTO_LESSONS_START}\n{lesson_entry}\n"
+                f"{AUTO_LESSONS_END}\n"
+            )
+        index_path.write_text(updated_content, encoding="utf-8")
+        return index_path
 
     before_block = existing_content[: start_idx + len(AUTO_LESSONS_START)]
     inside_block = existing_content[start_idx + len(AUTO_LESSONS_START) : end_idx]
@@ -176,6 +195,7 @@ def format_zettels_section(zettels: list[AtomicZettel]) -> str:
 def write_lesson_page(
     vault_root: Path,
     output: WikiLessonOutput,
+    force: bool = False,
 ) -> Path:
     """Writes or idempotently updates a lesson wiki page (Aula_NN_slug.md).
 
@@ -185,12 +205,13 @@ def write_lesson_page(
     Args:
         vault_root: Target Obsidian Vault root directory.
         output: Completed WikiLessonOutput containing validated lesson data.
+        force: Whether to auto-recover missing delimiters instead of raising ValueError.
 
     Returns:
         Path to the saved or updated lesson Markdown file.
 
     Raises:
-        ValueError: If delimiters are missing in an existing lesson file.
+        ValueError: If delimiters are missing in an existing lesson file and force=False.
     """
     discipline_dir = vault_root / "01_Wiki_Disciplinas" / output.discipline_slug
     discipline_dir.mkdir(parents=True, exist_ok=True)
@@ -238,9 +259,46 @@ def write_lesson_page(
     end_idx = existing_content.find(AUTO_CONTENT_END)
 
     if start_idx == -1 or end_idx == -1:
-        raise ValueError(
-            f"Delimiters '{AUTO_CONTENT_START}' and '{AUTO_CONTENT_END}' not found in {lesson_path}"
+        if not force:
+            raise ValueError(
+                f"Delimiters '{AUTO_CONTENT_START}' and '{AUTO_CONTENT_END}' "
+                f"not found in {lesson_path}"
+            )
+        notes_marker = "## Notas Pessoais de Aula"
+        marker_idx = existing_content.find(notes_marker)
+        if marker_idx != -1:
+            preserved_manual = existing_content[marker_idx:]
+        else:
+            preserved_manual = f"{notes_marker}\n<!-- Espaco preservado em reprocessamentos -->\n"
+
+        new_header = (
+            "---\n"
+            "type: wiki_aula\n"
+            f'discipline_slug: "{escape_yaml_str(output.discipline_slug)}"\n'
+            f'discipline_name: "{escape_yaml_str(output.discipline_name)}"\n'
+            f"lesson_number: {output.lesson_number}\n"
+            f'lesson_title: "{escape_yaml_str(output.lesson_title)}"\n'
+            f'lesson_slug: "{escape_yaml_str(output.lesson_slug)}"\n'
+            f"processed_date: {output.processed_date.isoformat()}\n"
+            f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
+            f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
+            f"removed_claims: {output.removed_unsupported_claims}\n"
+            "tags:\n"
+            "  - mba/aula\n"
+            f"  - mba/{output.discipline_slug}\n"
+            "---\n\n"
+            f"# Aula {output.lesson_number:02d}: {output.lesson_title}\n\n"
+            "> [!info] Contexto da Disciplina\n"
+            f"> Parte de [[01_Wiki_Disciplinas/{output.discipline_slug}/_Indice_Materia|"
+            f"{output.discipline_name}]] | Slide base: `{output.source_slide_filename}`\n\n"
+            f"{AUTO_CONTENT_START}\n"
+            f"{auto_body}\n"
+            f"{AUTO_CONTENT_END}\n\n"
+            "---\n"
         )
+        updated_content = f"{new_header}{preserved_manual}"
+        lesson_path.write_text(updated_content, encoding="utf-8")
+        return lesson_path
 
     after_block = existing_content[end_idx + len(AUTO_CONTENT_END) :]
 
@@ -279,6 +337,7 @@ def write_atomic_zettel(
     vault_root: Path,
     zettel: AtomicZettel,
     output: WikiLessonOutput,
+    force: bool = False,
 ) -> Path:
     """Writes or idempotently updates an atomic note in 02_Zettelkasten.
 
@@ -289,12 +348,13 @@ def write_atomic_zettel(
         vault_root: Target Obsidian Vault root directory.
         zettel: Atomic conceptual note model to persist.
         output: WikiLessonOutput providing context for course backlinking.
+        force: Whether to auto-recover missing delimiters instead of raising ValueError.
 
     Returns:
         Path to the saved or updated Zettel Markdown file.
 
     Raises:
-        ValueError: If delimiters are missing in an existing Zettel file.
+        ValueError: If delimiters are missing in an existing Zettel file and force=False.
     """
     zettel_dir = vault_root / "02_Zettelkasten"
     zettel_dir.mkdir(parents=True, exist_ok=True)
@@ -332,10 +392,25 @@ def write_atomic_zettel(
     end_idx = existing_content.find(AUTO_BACKLINKS_END)
 
     if start_idx == -1 or end_idx == -1:
-        raise ValueError(
-            f"Delimiters '{AUTO_BACKLINKS_START}' and '{AUTO_BACKLINKS_END}' "
-            f"not found in {zettel_path}"
-        )
+        if not force:
+            raise ValueError(
+                f"Delimiters '{AUTO_BACKLINKS_START}' and '{AUTO_BACKLINKS_END}' "
+                f"not found in {zettel_path}"
+            )
+        if "## Referencias no Curso" in existing_content:
+            pattern = re.compile(r"## Referencias no Curso.*?(?=\n## |\Z)", re.DOTALL)
+            healed_block = (
+                f"## Referencias no Curso\n{AUTO_BACKLINKS_START}\n"
+                f"{lesson_backlink}\n{AUTO_BACKLINKS_END}\n"
+            )
+            updated_content = pattern.sub(healed_block, existing_content)
+        else:
+            updated_content = (
+                existing_content.rstrip() + f"\n\n## Referencias no Curso\n{AUTO_BACKLINKS_START}\n"
+                f"{lesson_backlink}\n{AUTO_BACKLINKS_END}\n"
+            )
+        zettel_path.write_text(updated_content, encoding="utf-8")
+        return zettel_path
 
     # 1. Merge domain tags into frontmatter without duplicates
     fm_match = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", existing_content, re.DOTALL)
@@ -463,6 +538,7 @@ def export_lesson_to_vault(
     vault_root: Path,
     output: WikiLessonOutput,
     syllabus: SyllabusModule,
+    force: bool = False,
 ) -> VaultExportResult:
     """Coordinates idempotent export of all lesson artifacts to the Obsidian Vault.
 
@@ -473,20 +549,25 @@ def export_lesson_to_vault(
         vault_root: Target Obsidian Vault root directory.
         output: Validated WikiLessonOutput to persist.
         syllabus: Anchoring SyllabusModule for discipline metadata.
+        force: Whether to auto-recover damaged or missing HTML delimiters.
 
     Returns:
         VaultExportResult consolidating paths of all exported files.
 
     Raises:
-        ValueError: If file delimiters are damaged or missing during updates.
+        ValueError: If file delimiters are damaged or missing during updates and force=False.
         OSError: If filesystem operations fail.
     """
-    lesson_path = write_lesson_page(vault_root=vault_root, output=output)
-    index_path = write_discipline_index(vault_root=vault_root, syllabus=syllabus, output=output)
+    lesson_path = write_lesson_page(vault_root=vault_root, output=output, force=force)
+    index_path = write_discipline_index(
+        vault_root=vault_root, syllabus=syllabus, output=output, force=force
+    )
 
     zettel_paths: list[Path] = []
     for zettel in output.extracted_zettels:
-        z_path = write_atomic_zettel(vault_root=vault_root, zettel=zettel, output=output)
+        z_path = write_atomic_zettel(
+            vault_root=vault_root, zettel=zettel, output=output, force=force
+        )
         zettel_paths.append(z_path)
 
     audit_path = write_audit_report(vault_root=vault_root, output=output)
@@ -499,11 +580,13 @@ def export_lesson_to_vault(
                 vault_root=vault_root,
                 tension=tension,
                 output=output,
+                force=force,
             )
             tension_paths.append(t_path)
         tensions_index_path = write_tensions_index(
             vault_root=vault_root,
             tensions=output.detected_tensions,
+            force=force,
         )
 
     return VaultExportResult(
@@ -520,6 +603,7 @@ def write_dialectical_tension(
     vault_root: Path,
     tension: DialecticalTension,
     output: WikiLessonOutput,
+    force: bool = False,
 ) -> Path:
     """Creates or idempotently updates a dialectical tension note in 04_Diario_Tensoes.
 
@@ -530,12 +614,13 @@ def write_dialectical_tension(
         vault_root: Root directory of the target Obsidian Vault.
         tension: DialecticalTension model containing poles, thesis, and synthesis.
         output: Processed WikiLessonOutput with current lesson details.
+        force: Whether to auto-recover missing delimiters instead of raising ValueError.
 
     Returns:
         Path to the written or updated tension Markdown note.
 
     Raises:
-        ValueError: If delimiters are damaged or missing in an existing tension file.
+        ValueError: If delimiters are damaged in an existing tension file and force=False.
         OSError: If directory creation or file writing fails.
     """
     tensions_dir = vault_root / "04_Diario_Tensoes"
@@ -593,7 +678,48 @@ def write_dialectical_tension(
     ev_end = existing_content.find(AUTO_EVIDENCES_END)
 
     if -1 in (z_start, z_end, ev_start, ev_end):
-        raise ValueError(f"Delimiters missing or damaged in tension note: {tension_path}")
+        if not force:
+            raise ValueError(f"Delimiters missing or damaged in tension note: {tension_path}")
+        notes_marker = "## Anotações Pessoais e Resoluções Práticas"
+        marker_idx = existing_content.find(notes_marker)
+        preserved_notes = (
+            existing_content[marker_idx:]
+            if marker_idx != -1
+            else f"---\n{notes_marker}\n<!-- Espaço preservado em reprocessamentos -->\n"
+        )
+        z_lines = "\n".join(f"- [[{z}]]" for z in sorted(tension.related_zettel_slugs))
+        z_block = f"\n{z_lines}\n" if z_lines else "\n"
+        ev_block = f"\n{evidence_line}\n"
+        healed_content = (
+            "---\n"
+            'type: "diario_tensao"\n'
+            f'slug: "{escape_yaml_str(tension.slug)}"\n'
+            f'title: "{escape_yaml_str(tension.title)}"\n'
+            f'pole_a: "{escape_yaml_str(tension.pole_a_framework)}"\n'
+            f'pole_b: "{escape_yaml_str(tension.pole_b_framework)}"\n'
+            "tags:\n"
+            "  - mba/tensao\n"
+            "  - mba/dilema-executivo\n"
+            "---\n\n"
+            f"# {tension.title}\n\n"
+            "> [!abstract] Natureza do Trade-off\n"
+            f"> {tension.tension_nature}\n\n"
+            "## Polaridades Dialéticas\n\n"
+            "| Dimensão | Polo A (Tese) | Polo B (Antítese) |\n"
+            "| :--- | :--- | :--- |\n"
+            f"| **Disciplina** | {tension.pole_a_discipline} | {tension.pole_b_discipline} |\n"
+            f"| **Modelo/Framework** | {tension.pole_a_framework} | {tension.pole_b_framework} |\n"
+            f"| **Proposição Central** | {tension.pole_a_thesis} | {tension.pole_b_thesis} |\n\n"
+            "## Diretrizes de Síntese e Arbitragem Gerencial\n"
+            f"{tension.synthesis_guidelines}\n\n"
+            "## Conceitos Atômicos Relacionados\n"
+            f"{AUTO_ZETTELS_START}{z_block}{AUTO_ZETTELS_END}\n\n"
+            "## Aulas e Evidências Concorrentes\n"
+            f"{AUTO_EVIDENCES_START}{ev_block}{AUTO_EVIDENCES_END}\n\n"
+            f"{preserved_notes}"
+        )
+        tension_path.write_text(healed_content, encoding="utf-8")
+        return tension_path
 
     # 1. Update related zettels block
     z_block_content = existing_content[z_start + len(AUTO_ZETTELS_START) : z_end]
@@ -630,18 +756,20 @@ def write_dialectical_tension(
 def write_tensions_index(
     vault_root: Path,
     tensions: list[DialecticalTension],
+    force: bool = False,
 ) -> Path:
     """Creates or idempotently updates the master index of dialectical tensions.
 
     Args:
         vault_root: Root directory of the target Obsidian Vault.
         tensions: List of DialecticalTension instances to index.
+        force: Whether to auto-recover missing delimiters instead of raising ValueError.
 
     Returns:
         Path to the written or updated _Indice_Tensoes.md file.
 
     Raises:
-        ValueError: If delimiters are damaged in an existing tensions index file.
+        ValueError: If delimiters are damaged in an existing tensions index file and force=False.
         OSError: If directory creation or file writing fails.
     """
     tensions_dir = vault_root / "04_Diario_Tensoes"
@@ -683,7 +811,35 @@ def write_tensions_index(
     end_idx = existing_content.find(AUTO_TENSIONS_END)
 
     if start_idx == -1 or end_idx == -1:
-        raise ValueError(f"Delimiters missing or damaged in tensions index: {index_path}")
+        if not force:
+            raise ValueError(f"Delimiters missing or damaged in tensions index: {index_path}")
+        notes_marker = "## Notas de Síntese Pessoal"
+        marker_idx = existing_content.find(notes_marker)
+        preserved_notes = (
+            existing_content[marker_idx:]
+            if marker_idx != -1
+            else f"---\n{notes_marker}\n<!-- Espaço preservado em reprocessamentos -->\n"
+        )
+        entries = "\n".join(format_entry(t) for t in sorted(tensions, key=lambda x: x.slug))
+        block = f"\n{entries}\n" if entries else "\n"
+        healed_content = (
+            "---\n"
+            'type: "moc_tensoes"\n'
+            'title: "Índice de Tensões Dialéticas e Dilemas Executivos"\n'
+            "tags:\n"
+            "  - mba/indice\n"
+            "  - mba/tensoes\n"
+            "---\n\n"
+            "# Diário de Tensões Dialéticas do MBA\n\n"
+            "> [!quote] Visão Sistêmica\n"
+            "> Mapeamento de trade-offs, polaridades teóricas e conflitos de modelos "
+            "entre disciplinas do MBA.\n\n"
+            "## Matriz de Tensões Mapeadas\n"
+            f"{AUTO_TENSIONS_START}{block}{AUTO_TENSIONS_END}\n\n"
+            f"{preserved_notes}"
+        )
+        index_path.write_text(healed_content, encoding="utf-8")
+        return index_path
 
     block_content = existing_content[start_idx + len(AUTO_TENSIONS_START) : end_idx]
     existing_lines = [line.strip() for line in block_content.strip().splitlines() if line.strip()]

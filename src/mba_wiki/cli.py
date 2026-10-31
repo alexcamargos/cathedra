@@ -55,11 +55,11 @@ def set_client_override(client: StructuredLLMClient | None) -> None:
     _client_override = client
 
 
-def get_client() -> StructuredLLMClient:
+def get_client(auditor: bool = False) -> StructuredLLMClient:
     """Resolves and returns the active StructuredLLMClient instance.
 
     Args:
-        None.
+        auditor: Whether to resolve the specialized model for factual auditing.
 
     Returns:
         Configured StructuredLLMClient implementation.
@@ -70,9 +70,10 @@ def get_client() -> StructuredLLMClient:
     if _client_override is not None:
         return _client_override
     settings = get_settings()
+    model = settings.llm_model_auditor if auditor else settings.llm_model_drafter
     return create_llm_client(
         api_key=settings.gemini_api_key,
-        model=settings.llm_model_drafter,
+        model=model,
         backend=settings.llm_backend,
     )
 
@@ -208,6 +209,14 @@ def build_lesson(
             resolve_path=True,
         ),
     ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Força reprocessamento e recupera delimitadores HTML corrompidos no cofre.",
+        ),
+    ] = False,
 ) -> None:
     """Executa o pipeline completo de uma aula e exporta os arquivos para o Obsidian Vault.
 
@@ -270,8 +279,13 @@ def build_lesson(
             full_syllabus=structured_syllabus,
         )
 
-        client = get_client()
-        output = run_lesson_pipeline(state=state, client=client)
+        drafter_client = get_client(auditor=False)
+        auditor_client = get_client(auditor=True)
+        output = run_lesson_pipeline(
+            state=state,
+            client=drafter_client,
+            auditor_client=auditor_client,
+        )
         if not output.fact_check_passed:
             typer.secho(
                 "Aviso: A aula possui alertas na auditoria factual (bloqueadores não resolvidos).",
@@ -282,6 +296,7 @@ def build_lesson(
             vault_root=vault_root,
             output=output,
             syllabus=module,
+            force=force,
         )
 
         typer.echo(f"Aula {lesson:02d} processada com sucesso!")
@@ -383,11 +398,20 @@ def sync_tensions(
             resolve_path=True,
         ),
     ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Força sincronização e recupera delimitadores HTML corrompidos no índice.",
+        ),
+    ] = False,
 ) -> None:
     """Reindexa todas as notas de tensões dialéticas em 04_Diario_Tensoes/_Indice_Tensoes.md.
 
     Args:
         vault: Caminho opcional do Vault do Obsidian.
+        force: Força a regeneração de delimitadores corrompidos.
 
     Returns:
         None.
@@ -414,7 +438,11 @@ def sync_tensions(
             tension_model = parse_tension_note(file)
             scanned_tensions.append(tension_model)
 
-        index_path = write_tensions_index(vault_root=vault_root, tensions=scanned_tensions)
+        index_path = write_tensions_index(
+            vault_root=vault_root,
+            tensions=scanned_tensions,
+            force=force,
+        )
         typer.echo(
             f"Índice de tensões sincronizado com sucesso: {index_path} "
             f"({len(scanned_tensions)} tensões)"
