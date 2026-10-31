@@ -110,7 +110,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes unitarios cobrindo citacoes com pequenas variacoes e assercoes de bloqueio passando com `uv run pytest tests/test_fact_checker.py`, `uv run ruff check .` e `uv run mypy src/`.
 
 ## Etapa 18: Auditoria factual de Zettels atomicos e Tensoes dialeticas no grafo
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Integrar a verificacao de `extracted_zettels` e `detected_tensions` ao pipeline factual em `src/mba_wiki/agents/fact_checker.py` e `src/mba_wiki/agents/graph.py`. Se um zettel ou tensao contiver afirmacoes falsas (`S1`) ou sem suporte (`S4`), expurgar o item corrompido ou barrar a aprovacao do estado antes de persistir no cofre permanente.
 - **Arquivos afetados:** `src/mba_wiki/agents/fact_checker.py`, `src/mba_wiki/agents/graph.py`, `src/mba_wiki/schemas.py`, `tests/test_fact_checker.py`, `tests/test_graph.py`.
 - **Criterio de aceite:** Testes ponta a ponta garantindo que zettels/tensoes com alucinacoes nao cheguem a `WikiLessonOutput` passando com `uv run pytest tests/test_fact_checker.py tests/test_graph.py`, `uv run ruff check .` e `uv run mypy src/`.

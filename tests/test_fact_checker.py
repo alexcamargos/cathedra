@@ -16,8 +16,10 @@ from mba_wiki.agents.fact_checker import (
     get_fact_checker_prompt,
 )
 from mba_wiki.schemas import (
+    AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
+    DialecticalTension,
     FactCheckResult,
     LessonPipelineState,
     SlideChunk,
@@ -533,3 +535,167 @@ def test_apply_audit_remediations_punctuation_tolerant_matching_proposed_fix() -
     assert passed is True
     assert "28,4%" in audited_text
     assert "32,5%" not in audited_text
+
+
+def test_format_fact_checker_user_prompt_includes_zettels_and_tensions() -> None:
+    """Tests that format_fact_checker_user_prompt includes candidate zettels and tensions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Resumo da disciplina.",
+        topics=["VPL"],
+        bibliography=["Brealey"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Regra VPL")]
+    zettel = AtomicZettel(
+        slug="vpl-conceito",
+        title="Conceito de VPL",
+        domain_tags=["financas"],
+        content_markdown="O VPL mede a agregação de valor.",
+        related_links=[],
+    )
+
+    tension = DialecticalTension(
+        slug="eficiencia-vs-resiliencia",
+        title="Eficiência vs Resiliência",
+        pole_a_discipline="financas-corporativas",
+        pole_a_framework="WACC",
+        pole_a_thesis="Minimizar custo de capital",
+        pole_b_discipline="operacoes",
+        pole_b_framework="Just in Time",
+        pole_b_thesis="Otimizar estoque zero",
+        tension_nature="Curto vs Longo Prazo",
+        synthesis_guidelines="Manter colchão de liquidez operacional",
+        related_zettel_slugs=["vpl-conceito"],
+    )
+
+    prompt = format_fact_checker_user_prompt(
+        draft_text="Texto da aula sobre critérios de decisão.",
+        slides=slides,
+        syllabus=syllabus,
+        zettels=[zettel],
+        tensions=[tension],
+    )
+
+    assert "## Fonte 1: Ementa e Bibliografia Oficial da Disciplina" in prompt
+    assert "## Fonte 2: Conteúdo Literal dos Slides da Aula" in prompt
+    assert "## Rascunho da Aula a ser Auditado" in prompt
+    assert "## Conceitos Atômicos (Zettels) a serem Auditados" in prompt
+    assert "[Zettel: vpl-conceito] Conceito de VPL" in prompt
+    assert "## Tensões Dialéticas a serem Auditadas" in prompt
+    assert "[Tensão: eficiencia-vs-resiliencia] Eficiência vs Resiliência" in prompt
+
+
+def test_fact_check_node_purges_unsupported_zettels_and_tensions(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that fact_check_node purges zettels and tensions with unresolvable S1/S4 errors.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Finanças corporativas.",
+        topics=["VPL"],
+        bibliography=["Brealey"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Regra VPL > 0")]
+
+    valid_zettel = AtomicZettel(
+        slug="vpl-valido",
+        title="VPL Válido",
+        domain_tags=["financas"],
+        content_markdown="O VPL desconta fluxos à taxa de custo de capital.",
+        related_links=[],
+    )
+    hallucinated_zettel = AtomicZettel(
+        slug="alquimia-financeira",
+        title="Alquimia de Newton",
+        domain_tags=["misticismo"],
+        content_markdown="Isaac Newton descobriu a fórmula do WACC através de alquimia medieval.",
+        related_links=[],
+    )
+    hallucinated_tension = DialecticalTension(
+        slug="alquimia-vs-wacc",
+        title="Alquimia vs WACC",
+        pole_a_discipline="financas-corporativas",
+        pole_a_framework="WACC",
+        pole_a_thesis="Tese A",
+        pole_b_discipline="historia",
+        pole_b_framework="Alquimia Hermética",
+        pole_b_thesis="Tese B inventada",
+        tension_nature="Racional vs Místico",
+        synthesis_guidelines="Diretriz",
+        related_zettel_slugs=[],
+    )
+
+    state = LessonPipelineState(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        lesson_number=1,
+        lesson_title="Critérios de Avaliação",
+        lesson_slug="criterios-avaliacao",
+        source_slide_filename="aula_01.pdf",
+        slides=slides,
+        syllabus=syllabus,
+        raw_draft="O VPL desconta fluxos à taxa de custo de capital.",
+        extracted_zettels=[valid_zettel, hallucinated_zettel],
+        detected_tensions=[hallucinated_tension],
+    )
+
+    # Auditor flags hallucinated zettel and hallucinated tension as unsupported (S4)
+    claim_zettel = ClaimAuditItem(
+        claim_id="claim-zettel-s4",
+        quote="Isaac Newton descobriu a fórmula do WACC através de alquimia medieval",
+        category="attribution",
+        verdict="unsupported",
+        severity="S4",
+    )
+    claim_tension = ClaimAuditItem(
+        claim_id="claim-tension-s4",
+        quote="Alquimia Hermética",
+        category="technical",
+        verdict="unsupported",
+        severity="S4",
+    )
+    claim_draft_valid = ClaimAuditItem(
+        claim_id="claim-draft-ok",
+        quote="O VPL desconta fluxos à taxa de custo de capital.",
+        category="technical",
+        verdict="verified",
+    )
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(claims=[claim_draft_valid, claim_zettel, claim_tension])
+    )
+
+    updated_state = fact_check_node(state=state, client=fake_llm_client)
+
+    # Valid zettel is preserved
+    assert len(updated_state.extracted_zettels) == 1
+    assert updated_state.extracted_zettels[0].slug == "vpl-valido"
+    # Hallucinated zettel and tension are purged
+    assert not any(z.slug == "alquimia-financeira" for z in updated_state.extracted_zettels)
+    assert len(updated_state.detected_tensions) == 0
+    # Audit items recorded
+    assert len(updated_state.audit_items) == 3
+    assert updated_state.removed_unsupported_claims >= 2
+    assert updated_state.fact_check_passed is True

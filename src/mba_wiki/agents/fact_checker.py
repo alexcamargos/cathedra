@@ -10,8 +10,10 @@ from pathlib import Path
 
 from mba_wiki.agents.llm_client import StructuredLLMClient
 from mba_wiki.schemas import (
+    AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
+    DialecticalTension,
     FactCheckResult,
     LessonPipelineState,
     SlideChunk,
@@ -44,6 +46,8 @@ def format_fact_checker_user_prompt(
     draft_text: str,
     slides: list[SlideChunk],
     syllabus: SyllabusModule,
+    zettels: list[AtomicZettel] | None = None,
+    tensions: list[DialecticalTension] | None = None,
 ) -> str:
     """Formats contextual input payload containing draft prose and source materials.
 
@@ -51,6 +55,8 @@ def format_fact_checker_user_prompt(
         draft_text: Preliminary lesson draft prose to audit.
         slides: Primary source slide chunks containing text, tables, and LaTeX equations.
         syllabus: Anchoring syllabus module with official scope and bibliography.
+        zettels: Optional list of candidate atomic zettels to audit.
+        tensions: Optional list of candidate dialectical tensions to audit.
 
     Returns:
         Formatted markdown string representing the prompt for the fact checker LLM.
@@ -86,6 +92,30 @@ def format_fact_checker_user_prompt(
     # 3. Draft Text to Audit
     draft_sec = f"## Rascunho da Aula a ser Auditado\n\n```markdown\n{draft_text}\n```"
     sections.append(draft_sec)
+
+    # 4. Atomic Zettels (if present)
+    if zettels:
+        zettel_parts: list[str] = ["## Conceitos Atômicos (Zettels) a serem Auditados"]
+        for z in zettels:
+            zettel_parts.append(
+                f"### [Zettel: {z.slug}] {z.title}\n"
+                f"Tags: {', '.join(z.domain_tags)}\n\n"
+                f"{z.content_markdown}"
+            )
+        sections.append("\n\n".join(zettel_parts))
+
+    # 5. Dialectical Tensions (if present)
+    if tensions:
+        tension_parts: list[str] = ["## Tensões Dialéticas a serem Auditadas"]
+        for t in tensions:
+            tension_parts.append(
+                f"### [Tensão: {t.slug}] {t.title}\n"
+                f"- Polo A ({t.pole_a_discipline}): {t.pole_a_framework} - {t.pole_a_thesis}\n"
+                f"- Polo B ({t.pole_b_discipline}): {t.pole_b_framework} - {t.pole_b_thesis}\n"
+                f"- Natureza: {t.tension_nature}\n"
+                f"- Síntese: {t.synthesis_guidelines}"
+            )
+        sections.append("\n\n".join(tension_parts))
 
     return "\n\n".join(sections)
 
@@ -244,12 +274,132 @@ def apply_audit_remediations(
     return cleaned_text, removed_count, fact_check_passed
 
 
+def filter_and_remediate_zettels(
+    zettels: list[AtomicZettel],
+    audit_items: list[ClaimAuditItem],
+) -> tuple[list[AtomicZettel], int, bool]:
+    """Filters or remediates atomic zettels against audited factual claim items.
+
+    Prunes zettels that contain unresolvable critical claims (S1 or S4 without resolution),
+    applies proposed fixes where available, and records whether any unresolved blocker remains.
+
+    Args:
+        zettels: Candidate atomic zettels extracted from the lesson.
+        audit_items: Complete collection of claims evaluated by the auditor.
+
+    Returns:
+        Tuple containing (validated_zettels, removed_unsupported_count, has_blockers).
+
+    Raises:
+        None.
+    """
+    validated: list[AtomicZettel] = []
+    removed_count = 0
+    has_blockers = False
+
+    for zettel in zettels:
+        zettel_text = zettel.content_markdown
+        discard_zettel = False
+
+        for item in audit_items:
+            _, matches_content = locate_and_apply_remediation(zettel_text, item.quote)
+            _, matches_title = locate_and_apply_remediation(zettel.title, item.quote)
+            if not (matches_content or matches_title):
+                continue
+
+            if item.verdict == "unsupported" or item.severity == "S4":
+                discard_zettel = True
+                removed_count += 1
+                break
+            elif item.verdict in ("false", "misleading") or item.severity in ("S1", "S3", "S5"):
+                if item.proposed_fix:
+                    new_text, replaced = locate_and_apply_remediation(
+                        text=zettel_text,
+                        quote=item.quote,
+                        replacement=item.proposed_fix,
+                    )
+                    if replaced:
+                        zettel_text = new_text
+                    else:
+                        discard_zettel = True
+                        has_blockers = True
+                        break
+                else:
+                    discard_zettel = True
+                    break
+            elif item.verdict == "imprecise" or item.severity in ("S2", "S6"):
+                if item.proposed_fix:
+                    new_text, replaced = locate_and_apply_remediation(
+                        text=zettel_text,
+                        quote=item.quote,
+                        replacement=item.proposed_fix,
+                    )
+                    if replaced:
+                        zettel_text = new_text
+
+        if not discard_zettel:
+            zettel.content_markdown = zettel_text
+            validated.append(zettel)
+
+    return validated, removed_count, has_blockers
+
+
+def filter_and_remediate_tensions(
+    tensions: list[DialecticalTension],
+    audit_items: list[ClaimAuditItem],
+) -> tuple[list[DialecticalTension], int, bool]:
+    """Filters or remediates dialectical tensions against audited factual claim items.
+
+    Prunes tensions containing false frameworks (S1) or unsupported inventions (S4).
+
+    Args:
+        tensions: Candidate dialectical tensions identified during drafting.
+        audit_items: Complete collection of claims evaluated by the auditor.
+
+    Returns:
+        Tuple containing (validated_tensions, removed_unsupported_count, has_blockers).
+
+    Raises:
+        None.
+    """
+    validated: list[DialecticalTension] = []
+    removed_count = 0
+    has_blockers = False
+
+    for tension in tensions:
+        combined = (
+            f"{tension.title} {tension.pole_a_framework} {tension.pole_a_thesis} "
+            f"{tension.pole_b_framework} {tension.pole_b_thesis} {tension.synthesis_guidelines}"
+        )
+        discard_tension = False
+
+        for item in audit_items:
+            _, matches = locate_and_apply_remediation(combined, item.quote)
+            if not matches:
+                continue
+
+            if item.verdict == "unsupported" or item.severity == "S4":
+                discard_tension = True
+                removed_count += 1
+                break
+            elif item.verdict in ("false", "misleading") or item.severity in ("S1", "S3", "S5"):
+                discard_tension = True
+                break
+
+        if not discard_tension:
+            validated.append(tension)
+
+    return validated, removed_count, has_blockers
+
+
 def audit_lesson_draft(
     draft_text: str,
     slides: list[SlideChunk],
     syllabus: SyllabusModule,
     client: StructuredLLMClient,
     prompt: str | None = None,
+    zettels: list[AtomicZettel] | None = None,
+    tensions: list[DialecticalTension] | None = None,
 ) -> FactCheckResult:
     """Performs adversarial factual audit on lesson draft text using StructuredLLMClient.
 
@@ -259,9 +409,11 @@ def audit_lesson_draft(
         syllabus: Anchoring syllabus module.
         client: Implementation conforming to StructuredLLMClient protocol.
         prompt: Optional system prompt override. Defaults to loaded prompt.
+        zettels: Optional candidate atomic zettels to audit.
+        tensions: Optional candidate dialectical tensions to audit.
 
     Returns:
-        FactCheckResult containing audit items, status, and remediated text.
+        FactCheckResult containing audit items, status, remediated text, and validated collections.
 
     Raises:
         Exception: If LLM call or schema validation fails.
@@ -271,6 +423,8 @@ def audit_lesson_draft(
         draft_text=draft_text,
         slides=slides,
         syllabus=syllabus,
+        zettels=zettels,
+        tensions=tensions,
     )
 
     response: AuditClaimsResponse = client.generate_structured(
@@ -279,16 +433,77 @@ def audit_lesson_draft(
         response_model=AuditClaimsResponse,
     )
 
-    audited_markdown, removed_count, passed = apply_audit_remediations(
+    # 1. Segregate claims matching raw_draft vs secondary artifacts
+    draft_claims: list[ClaimAuditItem] = []
+    has_orphan_blockers = False
+
+    for item in response.claims:
+        _, matches_draft = locate_and_apply_remediation(draft_text, item.quote)
+        if matches_draft:
+            draft_claims.append(item)
+            continue
+
+        # Check if the claim belongs to candidate zettels or tensions
+        matched_in_secondary = False
+        for z in zettels or []:
+            _, m_c = locate_and_apply_remediation(z.content_markdown, item.quote)
+            _, m_t = locate_and_apply_remediation(z.title, item.quote)
+            if m_c or m_t:
+                matched_in_secondary = True
+                break
+
+        if not matched_in_secondary:
+            for t in tensions or []:
+                combined_t = (
+                    f"{t.title} {t.pole_a_framework} {t.pole_a_thesis} "
+                    f"{t.pole_b_framework} {t.pole_b_thesis} {t.synthesis_guidelines}"
+                )
+                _, m_tens = locate_and_apply_remediation(combined_t, item.quote)
+                if m_tens:
+                    matched_in_secondary = True
+                    break
+
+        if not matched_in_secondary and (
+            item.verdict in ("unsupported", "false", "misleading", "imprecise")
+            or item.severity in ("S1", "S2", "S3", "S4", "S5")
+        ):
+            has_orphan_blockers = True
+
+    audited_markdown, removed_count_draft, draft_passed = apply_audit_remediations(
         raw_text=draft_text,
-        audit_items=response.claims,
+        audit_items=draft_claims,
+    )
+
+    valid_zettels: list[AtomicZettel] = []
+    removed_count_zettels = 0
+    zettels_blockers = False
+    if zettels:
+        valid_zettels, removed_count_zettels, zettels_blockers = filter_and_remediate_zettels(
+            zettels=zettels,
+            audit_items=response.claims,
+        )
+
+    valid_tensions: list[DialecticalTension] = []
+    removed_count_tensions = 0
+    tensions_blockers = False
+    if tensions:
+        valid_tensions, removed_count_tensions, tensions_blockers = filter_and_remediate_tensions(
+            tensions=tensions,
+            audit_items=response.claims,
+        )
+
+    total_removed = removed_count_draft + removed_count_zettels + removed_count_tensions
+    overall_passed = (
+        draft_passed and not zettels_blockers and not tensions_blockers and not has_orphan_blockers
     )
 
     return FactCheckResult(
         audit_items=list(response.claims),
-        fact_check_passed=passed,
-        removed_unsupported_claims=removed_count,
+        fact_check_passed=overall_passed,
+        removed_unsupported_claims=total_removed,
         audited_markdown=audited_markdown,
+        validated_zettels=valid_zettels,
+        validated_tensions=valid_tensions,
     )
 
 
@@ -298,8 +513,9 @@ def fact_check_node(
 ) -> LessonPipelineState:
     """Graph node executor for the fact-checking stage within the lesson pipeline.
 
-    Audits state.raw_draft against state.slides and state.syllabus, updates audit_items,
-    tracks removed unsupported claims, and assigns audited_markdown.
+    Audits state.raw_draft, state.extracted_zettels, and state.detected_tensions
+    against slides and syllabus, updates audit_items, prunes ungrounded entities,
+    and updates pipeline state with validated outputs.
 
     Args:
         state: Pipeline state prior to factual auditing.
@@ -317,12 +533,16 @@ def fact_check_node(
         slides=state.slides,
         syllabus=state.syllabus,
         client=client,
+        zettels=state.extracted_zettels,
+        tensions=state.detected_tensions,
     )
 
     state.audit_items = list(result.audit_items)
     state.fact_check_passed = result.fact_check_passed
     state.removed_unsupported_claims = result.removed_unsupported_claims
     state.audited_markdown = result.audited_markdown
+    state.extracted_zettels = result.validated_zettels
+    state.detected_tensions = result.validated_tensions
     return state
 
 
@@ -331,6 +551,8 @@ __all__ = [
     "apply_audit_remediations",
     "audit_lesson_draft",
     "fact_check_node",
+    "filter_and_remediate_tensions",
+    "filter_and_remediate_zettels",
     "format_fact_checker_user_prompt",
     "get_fact_checker_prompt",
     "locate_and_apply_remediation",

@@ -90,22 +90,6 @@ class AuditClaimsResponse(BaseModel):
     claims: list[ClaimAuditItem] = Field(default_factory=list)
 
 
-class FactCheckResult(BaseModel):
-    """Schema representing the consolidated factual audit outcome and text remediation.
-
-    Attributes:
-        audit_items: Complete record of all individual claims audited.
-        fact_check_passed: Boolean indicating whether factual auditing passed without blockers.
-        removed_unsupported_claims: Total count of ungrounded statements pruned from the text.
-        audited_markdown: The final sanitized and remediated draft prose.
-    """
-
-    audit_items: list[ClaimAuditItem] = Field(default_factory=list)
-    fact_check_passed: bool
-    removed_unsupported_claims: int = 0
-    audited_markdown: str
-
-
 class HumanizerResult(BaseModel):
     """Schema representing the outcome of stylistic rewriting and validation.
 
@@ -182,6 +166,26 @@ class DialecticalTension(BaseModel):
     tension_nature: str
     synthesis_guidelines: str
     related_zettel_slugs: list[str] = Field(default_factory=list)
+
+
+class FactCheckResult(BaseModel):
+    """Schema representing the consolidated factual audit outcome and text remediation.
+
+    Attributes:
+        audit_items: Complete record of all individual claims audited.
+        fact_check_passed: Boolean indicating whether factual auditing passed without blockers.
+        removed_unsupported_claims: Total count of ungrounded statements pruned from the text.
+        audited_markdown: The final sanitized and remediated draft prose.
+        validated_zettels: Factually audited and validated atomic zettel notes.
+        validated_tensions: Factually audited and validated dialectical tensions.
+    """
+
+    audit_items: list[ClaimAuditItem] = Field(default_factory=list)
+    fact_check_passed: bool
+    removed_unsupported_claims: int = 0
+    audited_markdown: str
+    validated_zettels: list[AtomicZettel] = Field(default_factory=list)
+    validated_tensions: list[DialecticalTension] = Field(default_factory=list)
 
 
 class DraftResult(BaseModel):
