@@ -122,7 +122,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes unitarios simulando prompts extensos e outputs com logs preliminares passando com `uv run pytest tests/test_agy_client.py`, `uv run ruff check .` e `uv run mypy src/`.
 
 ## Etapa 20: Robustez do Humanizer contra loops N+1 e protecao de cercas de codigo
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Ajustar `strip_markdown_fences` em `src/mba_wiki/agents/humanizer.py` para proteger blocos de codigo Markdown finais legitimate. Implementar sanitizacao preliminar deterministica em Python para zettels antes de invocar a LLM, prevenindo a multiplicacao de chamadas sequenciais (N+1).
 - **Arquivos afetados:** `src/mba_wiki/agents/humanizer.py`, `tests/test_humanizer.py`.
 - **Criterio de aceite:** Testes validando preservacao de blocos de codigo e reducao de retentativas passando com `uv run pytest tests/test_humanizer.py`, `uv run ruff check .` e `uv run mypy src/`.

@@ -343,3 +343,89 @@ def test_humanize_node_humanizes_extracted_zettels(fake_llm_client: FakeLLMClien
     assert len(updated_state.extracted_zettels) == 1
     assert updated_state.extracted_zettels[0].content_markdown == clean_zettel
     assert len(fake_llm_client.calls) == 2
+
+
+def test_strip_markdown_fences_preserves_internal_code_blocks() -> None:
+    """Tests that strip_markdown_fences preserves internal code blocks ending the text.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.agents.humanizer import strip_markdown_fences
+
+    wrapped_with_code_at_end = (
+        "```markdown\n"
+        "# Aula de Modelagem\n\n"
+        "Exemplo de cálculo do WACC:\n\n"
+        "```python\n"
+        "def wacc(e, d, ke, kd, t):\n"
+        "    return (e / (e + d)) * ke + (d / (e + d)) * kd * (1 - t)\n"
+        "```\n"
+        "```"
+    )
+
+    stripped = strip_markdown_fences(wrapped_with_code_at_end)
+    # The outer wrapper is stripped, but the internal python block is fully preserved!
+    assert stripped.startswith("# Aula de Modelagem")
+    assert stripped.endswith("```")
+    assert "```python" in stripped
+
+
+def test_humanize_node_pre_sanitizes_simple_violations_without_extra_llm_call(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that deterministic dash violations in zettels are resolved without extra LLM calls.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Resumo",
+        topics=["VPL"],
+        bibliography=["Livro"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Texto")]
+    # Only contains an explanatory dash, which is deterministically resolvable
+    zettel = AtomicZettel(
+        slug="vpl-mecanico",
+        title="VPL Mecânico",
+        domain_tags=["financas"],
+        content_markdown="O método do VPL — uma métrica objetiva — desconta fluxos futuros.",
+        related_links=[],
+    )
+    state = LessonPipelineState(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        lesson_number=1,
+        lesson_title="Critérios",
+        lesson_slug="criterios",
+        source_slide_filename="aula1.pdf",
+        slides=slides,
+        syllabus=syllabus,
+        audited_markdown="Texto de aula aprovado na auditoria.",
+        extracted_zettels=[zettel],
+    )
+
+    clean_lesson = "Texto de aula polido e humanizado com rigor técnico."
+    fake_llm_client.add_text_response(clean_lesson)
+
+    updated_state = humanize_node(state=state, client=fake_llm_client)
+
+    # Only 1 LLM call was needed (for the lesson), 0 LLM calls for the zettel!
+    assert len(fake_llm_client.calls) == 1
+    assert "—" not in updated_state.extracted_zettels[0].content_markdown
+    assert "uma métrica objetiva" in updated_state.extracted_zettels[0].content_markdown

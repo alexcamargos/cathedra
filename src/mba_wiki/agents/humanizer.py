@@ -100,6 +100,9 @@ def format_remediation_feedback(
 def strip_markdown_fences(text: str) -> str:
     """Removes outer markdown code fences from LLM responses if present.
 
+    Preserves internal code fences (e.g. ```python ... ```) while stripping outer
+    ```markdown ... ``` or ``` wrappers.
+
     Args:
         text: Raw text string potentially wrapped in ```markdown ... ``` fences.
 
@@ -110,10 +113,57 @@ def strip_markdown_fences(text: str) -> str:
         None.
     """
     clean = text.strip()
-    if clean.startswith("```"):
+    lines = clean.splitlines()
+    if len(lines) >= 2 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+        clean = "\n".join(lines[1:-1]).strip()
+    elif clean.startswith("```"):
         clean = re.sub(r"^```(?:markdown|md)?\s*\n?", "", clean)
         clean = re.sub(r"\n?\s*```$", "", clean)
     return clean.strip()
+
+
+def sanitize_markdown_heuristics(text: str) -> str:
+    """Deterministically sanitizes common stylistic violations before LLM invocation.
+
+    Applies deterministic transformations to resolve explanatory em-dashes and
+    en-dashes, decorative arrows, and stiff formulaic connectives to prevent
+    unnecessary LLM round-trips for simple atomic artifacts.
+
+    Args:
+        text: Input markdown text potentially containing stylistic violations.
+
+    Returns:
+        Sanitized markdown text with mechanical violations resolved.
+
+    Raises:
+        None.
+    """
+    if not text.strip():
+        return text
+
+    # Rule R1: Replace em-dash and en-dash used as parenthetical/explanatory dashes with commas
+    sanitized = re.sub(r"\s*[—–]\s*", ", ", text)
+    # Fix punctuation collisions caused by dash replacement (e.g., ", ," or ", .")
+    sanitized = re.sub(r",\s*,+", ",", sanitized)
+    sanitized = re.sub(r",\s*\.", ".", sanitized)
+    sanitized = re.sub(r",\s*;", ";", sanitized)
+    sanitized = re.sub(r",\s*:", ":", sanitized)
+
+    # Rule R2: Replace decorative arrows with standard ASCII directional tokens
+    sanitized = re.sub(r"\s*[→⇒]\s*", " -> ", sanitized)
+    sanitized = re.sub(r"\s*[←⇐]\s*", " <- ", sanitized)
+    sanitized = re.sub(r"\s*[↔↕]\s*", " <-> ", sanitized)
+
+    # Rule L5: Replace stiff connectives where cleanly substitutable
+    sanitized = re.sub(r"(?i)\boutrossim,?\s*", "além disso, ", sanitized)
+    sanitized = re.sub(r"(?i)\bademais,?\s*", "além disso, ", sanitized)
+    sanitized = re.sub(r"(?i)\bdestarte,?\s*", "assim, ", sanitized)
+    sanitized = re.sub(r"(?i)\bpor conseguinte,?\s*", "logo, ", sanitized)
+    sanitized = re.sub(r"(?i)\bvale ressaltar que\s*", "", sanitized)
+    sanitized = re.sub(r"(?i)\bé importante notar que\s*", "", sanitized)
+    sanitized = re.sub(r"(?i)\bcabe destacar que\s*", "", sanitized)
+
+    return sanitized
 
 
 def humanize_text(
@@ -215,12 +265,17 @@ def humanize_node(
         if zettel.content_markdown.strip():
             zettel_validation = validate_markdown_prose(zettel.content_markdown)
             if not zettel_validation.is_valid:
-                zettel_result = humanize_text(
-                    text=zettel.content_markdown,
-                    client=client,
-                    max_attempts=max_attempts,
-                )
-                zettel.content_markdown = zettel_result.humanized_text
+                # Attempt deterministic heuristic sanitization first to prevent N+1 LLM calls
+                sanitized_content = sanitize_markdown_heuristics(zettel.content_markdown)
+                if validate_markdown_prose(sanitized_content).is_valid:
+                    zettel.content_markdown = sanitized_content
+                else:
+                    zettel_result = humanize_text(
+                        text=sanitized_content,
+                        client=client,
+                        max_attempts=max_attempts,
+                    )
+                    zettel.content_markdown = zettel_result.humanized_text
 
     return state
 
@@ -232,5 +287,6 @@ __all__ = [
     "get_humanizer_prompt",
     "humanize_node",
     "humanize_text",
+    "sanitize_markdown_heuristics",
     "strip_markdown_fences",
 ]
