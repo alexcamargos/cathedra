@@ -713,3 +713,244 @@ def test_build_lesson_with_force_recovers_corrupted_vault(
         assert "Minha nota importante." in content
     finally:
         set_client_override(None)
+
+
+def test_transcribe_batch_help(cli_runner: CliRunner) -> None:
+    """Tests that transcribe-batch command displays its options and description.
+
+    Args:
+        cli_runner: CliRunner fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    result = cli_runner.invoke(app, ["transcribe-batch", "--help"])
+    assert result.exit_code == 0
+    assert "transcribe-batch" in result.stdout
+    assert "--model" in result.stdout
+    assert "--output-dir" in result.stdout
+    assert "--force" in result.stdout
+
+
+def test_transcribe_batch_missing_dir(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """Tests failure when videos directory does not exist.
+
+    Args:
+        cli_runner: CliRunner fixture.
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    non_existent = tmp_path / "pastas_inexistente"
+    result = cli_runner.invoke(app, ["transcribe-batch", str(non_existent)])
+    assert result.exit_code != 0
+
+
+def test_transcribe_batch_success(
+    cli_runner: CliRunner, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Tests successful invocation of transcribe-batch with summary report output.
+
+    Args:
+        cli_runner: CliRunner fixture.
+        tmp_path: Pytest temporary directory fixture.
+        mocker: Pytest mocker fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.transcription.batch_runner import BatchRunSummary
+
+    mock_summary = BatchRunSummary(
+        total_videos_found=5,
+        videos_processed=4,
+        videos_skipped=1,
+        failed_videos=[],
+        total_duration_seconds=36000.0,
+        elapsed_processing_seconds=450.0,
+    )
+
+    mocker.patch(
+        "mba_wiki.cli.LectureTranscriber",
+        return_value=mocker.MagicMock(),
+    )
+    mock_run = mocker.patch(
+        "mba_wiki.cli.run_transcription_batch",
+        return_value=mock_summary,
+    )
+
+    videos_dir = tmp_path / "videos"
+    videos_dir.mkdir()
+
+    result = cli_runner.invoke(app, ["transcribe-batch", str(videos_dir)])
+    assert result.exit_code == 0
+    assert "Lote de transcrição concluído com sucesso" in result.stdout
+    assert "Encontrados: 5" in result.stdout
+    assert "Processados: 4" in result.stdout
+    assert "Ignorados: 1" in result.stdout
+    mock_run.assert_called_once()
+
+
+def test_transcribe_batch_with_options(
+    cli_runner: CliRunner, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Tests transcribe-batch forwarding custom CLI options to transcriber and runner.
+
+    Args:
+        cli_runner: CliRunner fixture.
+        tmp_path: Pytest temporary directory fixture.
+        mocker: Pytest mocker fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from mba_wiki.transcription.batch_runner import BatchRunSummary
+
+    mock_summary = BatchRunSummary(
+        total_videos_found=1,
+        videos_processed=1,
+        videos_skipped=0,
+        failed_videos=[],
+        total_duration_seconds=7200.0,
+        elapsed_processing_seconds=120.0,
+    )
+
+    mock_transcriber_cls = mocker.patch(
+        "mba_wiki.cli.LectureTranscriber",
+        return_value=mocker.MagicMock(),
+    )
+    mock_run = mocker.patch(
+        "mba_wiki.cli.run_transcription_batch",
+        return_value=mock_summary,
+    )
+
+    videos_dir = tmp_path / "videos"
+    videos_dir.mkdir()
+    custom_out = tmp_path / "custom_out"
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "transcribe-batch",
+            str(videos_dir),
+            "--output-dir",
+            str(custom_out),
+            "--model",
+            "medium",
+            "--device",
+            "cpu",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0
+    mock_transcriber_cls.assert_called_once_with(model_size="medium", device="cpu")
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["force"] is True
+
+
+def test_build_lesson_with_explicit_transcript(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests build-lesson execution when explicit transcript JSON option is provided.
+
+    Args:
+        cli_runner: CliRunner fixture.
+        synthetic_cli_pdf: PDF slides fixture.
+        tmp_path: Temporary directory fixture.
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="financas-corporativas",
+                discipline_name="Finanças Corporativas",
+                syllabus_summary="Critérios de avaliação de investimentos.",
+                topics=["VPL", "TIR"],
+                bibliography=["Brealey, Myers."],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    transcript = VideoTranscript(
+        source_filename="aula_01_financas.mp4",
+        discipline_slug="financas-corporativas",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="Texto gravado da aula",
+        full_text_cleaned="O professor detalhou o VPL com exemplos práticos.",
+        segments=[],
+    )
+    transcript_file = tmp_path / "aula_01_financas.json"
+    transcript_file.write_text(transcript.model_dump_json(indent=2), encoding="utf-8")
+
+    fake_llm_client.add_structured_response(
+        DraftResult(
+            raw_draft="O método do VPL analisa os fluxos descontados à taxa de oportunidade.",
+            extracted_zettels=[],
+            cross_links=[],
+            detected_tensions=[],
+        )
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(claims=[], overall_verdict="approved")
+    )
+    fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
+
+    set_client_override(fake_llm_client)
+    try:
+        result = cli_runner.invoke(
+            app,
+            [
+                "build-lesson",
+                str(synthetic_cli_pdf),
+                "--discipline",
+                "financas-corporativas",
+                "--lesson",
+                "1",
+                "--vault",
+                str(vault_dir),
+                "--transcript",
+                str(transcript_file),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Transcrição de fala vinculada" in result.stdout
+        assert "Aula 01 processada com sucesso" in result.stdout
+        assert "Transcrição Vinculada: aula_01_financas.mp4" in result.stdout
+    finally:
+        set_client_override(None)

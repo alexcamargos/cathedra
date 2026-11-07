@@ -29,6 +29,8 @@ from mba_wiki.ingestion.syllabus_parser import (
     process_and_save_syllabus,
 )
 from mba_wiki.schemas import DialecticalTension
+from mba_wiki.transcription.batch_runner import run_transcription_batch
+from mba_wiki.transcription.transcriber import LectureTranscriber
 
 app = typer.Typer(
     name="mba-wiki",
@@ -209,6 +211,16 @@ def build_lesson(
             resolve_path=True,
         ),
     ] = None,
+    transcript: Annotated[
+        Path | None,
+        typer.Option(
+            "--transcript",
+            "-t",
+            help="Caminho explícito para a transcrição da aula em formato JSON.",
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
     force: Annotated[
         bool,
         typer.Option(
@@ -228,6 +240,8 @@ def build_lesson(
         slug: Slug opcional da aula.
         vault: Caminho opcional do Obsidian Vault.
         syllabus_json: Caminho opcional para ementa_estruturada.json.
+        transcript: Caminho opcional para a transcrição da videoaula em formato JSON.
+        force: Força reprocessamento de arquivos e delimitações.
 
     Returns:
         None.
@@ -270,6 +284,22 @@ def build_lesson(
     try:
         resolved_slug = slug or (slugify(title) if title else None)
 
+        # Resolução de transcrição de fala (explícita ou auto-detecção em data/raw/transcripts)
+        resolved_transcript_path: Path | None = transcript
+        if resolved_transcript_path is None:
+            candidate_paths = [
+                Path("data/raw/transcripts") / discipline / f"{slide_path.stem}.json",
+                Path("data/raw/transcripts") / "geral" / f"{slide_path.stem}.json",
+                Path("data/raw/transcripts") / discipline / f"Aula_{lesson:02d}.json",
+            ]
+            for candidate in candidate_paths:
+                if candidate.is_file():
+                    resolved_transcript_path = candidate.resolve()
+                    break
+
+        if resolved_transcript_path and resolved_transcript_path.is_file():
+            typer.echo(f"Transcrição de fala vinculada: {resolved_transcript_path.name}")
+
         state = ingestion_node(
             slide_path=slide_path,
             syllabus=module,
@@ -277,6 +307,7 @@ def build_lesson(
             lesson_title=title,
             lesson_slug=resolved_slug,
             full_syllabus=structured_syllabus,
+            transcript_path=resolved_transcript_path,
         )
 
         drafter_client = get_client(auditor=False)
@@ -301,6 +332,8 @@ def build_lesson(
 
         typer.echo(f"Aula {lesson:02d} processada com sucesso!")
         typer.echo(f"- Wiki da Aula: {export_result.lesson_path}")
+        if output.source_transcript_filename:
+            typer.echo(f"- Transcrição Vinculada: {output.source_transcript_filename}")
         typer.echo(f"- Índice MOC: {export_result.index_path}")
         typer.echo(f"- Zettels exportados: {len(export_result.zettel_paths)}")
         typer.echo(f"- Relatório Factual: {export_result.audit_report_path}")
@@ -449,4 +482,102 @@ def sync_tensions(
         )
     except Exception as exc:
         typer.echo(f"Erro ao sincronizar índice de tensões: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command(name="transcribe-batch")
+def transcribe_batch(
+    videos_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Diretório contendo as videoaulas organizadas por disciplina.",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ],
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            help="Diretório raiz para salvar as transcrições JSON (padrão: data/raw/transcripts).",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Tamanho do modelo Faster-Whisper (ex.: large-v3, medium, small).",
+        ),
+    ] = "large-v3",
+    device: Annotated[
+        str | None,
+        typer.Option(
+            "--device",
+            help="Dispositivo de computação ('cuda' ou 'cpu'). Padrão: auto-detecção.",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Força reprocessamento de vídeos que já possuem transcrição válida.",
+        ),
+    ] = False,
+) -> None:
+    """Executa transcrição em lote desacoplada de videoaulas com suporte a aceleração CUDA.
+
+    Args:
+        videos_dir: Diretório raiz contendo videoaulas por disciplina.
+        output_dir: Diretório de destino para transcrições em JSON.
+        model: Identificador do modelo Faster-Whisper.
+        device: Dispositivo de execução opcional ('cuda' ou 'cpu').
+        force: Força reprocessamento de arquivos já transcritos.
+
+    Returns:
+        None.
+
+    Raises:
+        typer.Exit: Com código 1 em caso de falha crítica na inicialização.
+    """
+    target_output = output_dir or Path("data/raw/transcripts")
+
+    try:
+        typer.echo(f"Iniciando transcritor (modelo: {model}, dispositivo: {device or 'auto'})...")
+        transcriber = LectureTranscriber(model_size=model, device=device)
+
+        typer.echo(f"Processando vídeos em: {videos_dir}")
+        typer.echo(f"Destino das transcrições: {target_output}")
+
+        summary = run_transcription_batch(
+            videos_dir=videos_dir,
+            output_dir=target_output,
+            transcriber=transcriber,
+            force=force,
+        )
+
+        typer.echo("\n--- Lote de transcrição concluído com sucesso ---")
+        typer.echo(f"Total de vídeos: Encontrados: {summary.total_videos_found}")
+        typer.echo(f"Processados: {summary.videos_processed}")
+        typer.echo(f"Ignorados: {summary.videos_skipped} (já existentes)")
+        typer.echo(f"Falhas: {len(summary.failed_videos)}")
+        duration_min = summary.total_duration_seconds / 60
+        typer.echo(f"Duração de mídia transcrita: {duration_min:.1f} minutos")
+        typer.echo(f"Tempo de processamento: {summary.elapsed_processing_seconds:.1f} segundos")
+
+        if summary.failed_videos:
+            typer.echo("\nVídeos que falharam durante o lote:")
+            for name, err in summary.failed_videos:
+                typer.echo(f"- {name}: {err}", err=True)
+
+    except Exception as exc:
+        typer.echo(f"Erro fatal na execução do lote de transcrição: {exc}", err=True)
         raise typer.Exit(code=1) from exc
