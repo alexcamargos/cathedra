@@ -14,6 +14,7 @@ from mba_wiki.schemas import (
     SlideChunk,
     StructuredSyllabus,
     SyllabusModule,
+    VideoTranscript,
 )
 
 DEFAULT_DRAFTER_PROMPT_PATH = Path(__file__).parent / "prompts" / "drafter.md"
@@ -42,6 +43,7 @@ def format_drafter_user_prompt(
     syllabus: SyllabusModule,
     full_syllabus: StructuredSyllabus | None = None,
     lesson_title: str | None = None,
+    transcript: VideoTranscript | None = None,
 ) -> str:
     """Formats contextual input payload containing syllabus guidelines and slide chunks.
 
@@ -50,6 +52,7 @@ def format_drafter_user_prompt(
         syllabus: Anchoring syllabus module containing scope, topics, and bibliography.
         full_syllabus: Optional full course curriculum for cross-disciplinary insights.
         lesson_title: Optional title of the lesson theme being drafted.
+        transcript: Optional consolidated speech transcript of the recorded lecture.
 
     Returns:
         Formatted markdown string representing the user prompt for the LLM.
@@ -119,6 +122,22 @@ def format_drafter_user_prompt(
         slides_context_parts.append(slide_block)
 
     sections.append("\n\n".join(slides_context_parts))
+
+    # 5. Teacher Speech Transcript Context (Multimodal lecture recording)
+    if transcript:
+        duration_min = transcript.duration_seconds / 60
+        transcript_section = (
+            f"## Transcrição da Fala do Professor (Gravação em Aula)\n"
+            f"Duração gravada: {duration_min:.1f} minutos | "
+            f"Arquivo de origem: `{transcript.source_filename}`\n\n"
+            f"Abaixo está a fala literal do professor após normalização de disfluências. "
+            f"Utilize esta transcrição para aprofundar cada tópico dos slides, incorporando "
+            f"os exemplos de mercado, analogias didáticas e esclarecimentos conceituais "
+            f"fornecidos oralmente:\n\n"
+            f"{transcript.full_text_cleaned}"
+        )
+        sections.append(transcript_section)
+
     return "\n\n".join(sections)
 
 
@@ -129,6 +148,7 @@ def generate_draft(
     full_syllabus: StructuredSyllabus | None = None,
     lesson_title: str | None = None,
     prompt: str | None = None,
+    transcript: VideoTranscript | None = None,
 ) -> DraftResult:
     """Executes structured generation to produce the lesson draft and atomic zettels.
 
@@ -139,6 +159,7 @@ def generate_draft(
         full_syllabus: Optional full course curriculum for cross-disciplinary insights.
         lesson_title: Optional human-readable lesson theme title.
         prompt: Optional system prompt override. Defaults to loaded drafter prompt.
+        transcript: Optional consolidated speech transcript of the recorded lecture.
 
     Returns:
         DraftResult containing raw_draft, extracted_zettels, cross_links, and detected_tensions.
@@ -156,6 +177,7 @@ def generate_draft(
         syllabus=syllabus,
         full_syllabus=full_syllabus,
         lesson_title=lesson_title,
+        transcript=transcript,
     )
 
     result: DraftResult = client.generate_structured(
@@ -193,6 +215,7 @@ def draft_node(
         client=client,
         full_syllabus=state.full_syllabus,
         lesson_title=state.lesson_title,
+        transcript=state.transcript,
     )
 
     state.raw_draft = draft_result.raw_draft

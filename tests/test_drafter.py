@@ -446,8 +446,53 @@ def test_generate_draft_with_full_syllabus_and_tensions(fake_llm_client: FakeLLM
     assert "Visão Global do Currículo do MBA" in fake_llm_client.last_call.user_prompt
 
 
-def test_draft_node_passes_full_syllabus_from_state(fake_llm_client: FakeLLMClient) -> None:
-    """Tests that draft_node transmits state.full_syllabus when available.
+def test_format_drafter_user_prompt_with_transcript() -> None:
+    """Tests that format_drafter_user_prompt includes speech transcript when provided.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="gestao",
+        discipline_name="Gestão",
+        syllabus_summary="Resumo de gestão.",
+        topics=["Liderança"],
+        bibliography=["Drucker"],
+    )
+    slides = [SlideChunk(slide_number=1, title="Liderança", raw_text="Liderança servidora.")]
+    transcript = VideoTranscript(
+        source_filename="aula_lideranca.mp4",
+        discipline_slug="gestao",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="O professor explicou que liderança servidora é...",
+        full_text_cleaned="O professor explicou que liderança servidora é um modelo prático.",
+        segments=[],
+    )
+
+    prompt = format_drafter_user_prompt(
+        slides=slides,
+        syllabus=syllabus,
+        transcript=transcript,
+    )
+    assert "Transcrição da Fala do Professor" in prompt
+    assert "O professor explicou que liderança servidora é um modelo prático." in prompt
+
+
+def test_draft_node_transmits_state_transcript(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that draft_node transmits state.transcript to LLM user prompt when present.
 
     Args:
         fake_llm_client: Mock LLM client fixture.
@@ -458,41 +503,46 @@ def test_draft_node_passes_full_syllabus_from_state(fake_llm_client: FakeLLMClie
     Raises:
         None.
     """
-    syllabus = SyllabusModule(
-        discipline_slug="operacoes",
-        discipline_name="Operações",
-        syllabus_summary="Gestão de estoques.",
-        topics=["Kanban"],
-        bibliography=["Slack"],
-    )
-    other = SyllabusModule(
-        discipline_slug="financas",
-        discipline_name="Finanças",
-        syllabus_summary="Finanças.",
-        topics=["Capital de Giro"],
-        bibliography=["Assaf"],
-    )
-    full = StructuredSyllabus(modules=[syllabus, other])
-    slides = [SlideChunk(slide_number=1, title="Kanban", raw_text="Sistema puxado.")]
+    from datetime import UTC, datetime
 
+    from mba_wiki.schemas import VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="gestao",
+        discipline_name="Gestão",
+        syllabus_summary="Resumo de gestão.",
+        topics=["Liderança"],
+        bibliography=["Drucker"],
+    )
+    slides = [SlideChunk(slide_number=1, title="Liderança", raw_text="Liderança servidora.")]
+    transcript = VideoTranscript(
+        source_filename="aula_lideranca.mp4",
+        discipline_slug="gestao",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="Texto bruto",
+        full_text_cleaned="Exemplo real de mercado dado pelo professor.",
+        segments=[],
+    )
     state = LessonPipelineState(
-        discipline_slug="operacoes",
-        discipline_name="Operações",
+        discipline_slug="gestao",
+        discipline_name="Gestão",
         lesson_number=1,
-        lesson_title="Fluxo Puxado",
-        lesson_slug="fluxo-puxado",
-        source_slide_filename="aula.pdf",
+        lesson_title="Liderança",
+        lesson_slug="lideranca",
+        source_slide_filename="slides.pdf",
         slides=slides,
         syllabus=syllabus,
-        full_syllabus=full,
+        transcript=transcript,
     )
 
-    draft_result = DraftResult(
-        raw_draft="Rascunho de operações.",
-    )
+    draft_result = DraftResult(raw_draft="Rascunho de liderança.")
     fake_llm_client.add_structured_response(draft_result)
 
     draft_node(state=state, client=fake_llm_client)
 
     assert fake_llm_client.last_call is not None
-    assert "Visão Global do Currículo do MBA" in fake_llm_client.last_call.user_prompt
+    assert "Transcrição da Fala do Professor" in fake_llm_client.last_call.user_prompt
+    assert "Exemplo real de mercado dado pelo professor." in fake_llm_client.last_call.user_prompt
