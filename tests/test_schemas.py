@@ -4,7 +4,7 @@ Validates instantiation, serialization, defaults, and validation errors for all 
 defined in Section 3 of SPEC.md.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +23,8 @@ from mba_wiki.schemas import (
     SlideChunk,
     StructuredSyllabus,
     SyllabusModule,
+    TranscriptSegment,
+    VideoTranscript,
     WikiLessonOutput,
 )
 
@@ -791,3 +793,217 @@ def test_lesson_pipeline_state_with_cross_links_and_tensions() -> None:
     )
     assert state.cross_links == []
     assert state.detected_tensions == []
+
+
+def test_transcript_segment_valid() -> None:
+    """Tests successful instantiation, validation and serialization of TranscriptSegment.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    segment = TranscriptSegment(
+        id=1,
+        start=10.5,
+        end=15.2,
+        text_raw="É... bom dia a todos, hoje veremos CAPM.",
+        text_cleaned="Bom dia a todos, hoje veremos CAPM.",
+    )
+    assert segment.id == 1
+    assert segment.start == 10.5
+    assert segment.end == 15.2
+    assert segment.text_raw == "É... bom dia a todos, hoje veremos CAPM."
+    assert segment.text_cleaned == "Bom dia a todos, hoje veremos CAPM."
+
+    dumped = segment.model_dump()
+    restored = TranscriptSegment.model_validate(dumped)
+    assert restored == segment
+
+
+def test_transcript_segment_invalid_timestamps() -> None:
+    """Tests rejection of invalid start or end timestamps in TranscriptSegment.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    with pytest.raises(ValidationError):
+        # end before start
+        TranscriptSegment(
+            id=1,
+            start=20.0,
+            end=10.0,
+            text_raw="Texto",
+            text_cleaned="Texto",
+        )
+
+    with pytest.raises(ValidationError):
+        # negative start
+        TranscriptSegment(
+            id=1,
+            start=-1.0,
+            end=10.0,
+            text_raw="Texto",
+            text_cleaned="Texto",
+        )
+
+
+def test_video_transcript_valid() -> None:
+    """Tests successful instantiation, defaults and round-trip serialization of VideoTranscript.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    now = datetime.now(UTC)
+    segment = TranscriptSegment(
+        id=1,
+        start=0.0,
+        end=5.0,
+        text_raw="Iniciando a aula.",
+        text_cleaned="Iniciando a aula.",
+    )
+    transcript = VideoTranscript(
+        source_filename="Aula_01_Estrategia.mp4",
+        discipline_slug="estrategia-competitiva",
+        duration_seconds=10800.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=now,
+        full_text_raw="Iniciando a aula.",
+        full_text_cleaned="Iniciando a aula.",
+        segments=[segment],
+    )
+    assert transcript.source_filename == "Aula_01_Estrategia.mp4"
+    assert transcript.discipline_slug == "estrategia-competitiva"
+    assert transcript.duration_seconds == 10800.0
+    assert len(transcript.segments) == 1
+    assert transcript.segments[0].id == 1
+
+    dumped = transcript.model_dump()
+    restored = VideoTranscript.model_validate(dumped)
+    assert restored.source_filename == transcript.source_filename
+    assert restored.segments == transcript.segments
+
+
+def test_video_transcript_invalid_duration() -> None:
+    """Tests rejection of negative duration_seconds in VideoTranscript.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    with pytest.raises(ValidationError):
+        VideoTranscript(
+            source_filename="Aula_01.mp4",
+            discipline_slug="financas",
+            duration_seconds=-10.0,
+            model_name="large-v3",
+            compute_type="int8_float16",
+            processed_at=datetime.now(UTC),
+            full_text_raw="Texto",
+            full_text_cleaned="Texto",
+        )
+
+
+def test_lesson_pipeline_state_with_transcript() -> None:
+    """Tests LessonPipelineState extension supporting optional VideoTranscript.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    module = SyllabusModule(
+        discipline_slug="estrategia",
+        discipline_name="Estratégia",
+        syllabus_summary="Resumo de estratégia.",
+        topics=["Vantagem Competitiva"],
+        bibliography=["Porter"],
+    )
+    transcript = VideoTranscript(
+        source_filename="aula_01.mp4",
+        discipline_slug="estrategia",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="Texto gravado da aula.",
+        full_text_cleaned="Texto gravado da aula.",
+        segments=[],
+    )
+    state = LessonPipelineState(
+        discipline_slug="estrategia",
+        discipline_name="Estratégia",
+        lesson_number=1,
+        lesson_title="Vantagem Competitiva",
+        lesson_slug="vantagem-competitiva",
+        source_slide_filename="slides.pdf",
+        slides=[],
+        syllabus=module,
+        transcript=transcript,
+    )
+    assert state.transcript is not None
+    assert state.transcript.source_filename == "aula_01.mp4"
+
+    dumped = state.model_dump()
+    restored = LessonPipelineState.model_validate(dumped)
+    assert restored.transcript is not None
+    assert restored.transcript.source_filename == "aula_01.mp4"
+
+
+def test_wiki_lesson_output_with_transcript_filename() -> None:
+    """Tests WikiLessonOutput extension supporting source_transcript_filename.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    output = WikiLessonOutput(
+        discipline_slug="estrategia",
+        discipline_name="Estratégia",
+        lesson_number=1,
+        lesson_title="Vantagem Competitiva",
+        lesson_slug="vantagem-competitiva",
+        processed_date=date(2026, 11, 7),
+        source_slide_filename="slides.pdf",
+        source_transcript_filename="aula_01.mp4",
+        fact_check_passed=True,
+        removed_unsupported_claims=0,
+        body_markdown="Corpo da aula.",
+        extracted_zettels=[],
+    )
+    assert output.source_transcript_filename == "aula_01.mp4"
+
+    dumped = output.model_dump()
+    restored = WikiLessonOutput.model_validate(dumped)
+    assert restored.source_transcript_filename == "aula_01.mp4"
