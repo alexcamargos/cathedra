@@ -132,3 +132,55 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Atualizar `src/mba_wiki/cli.py` para honrar `llm_model_auditor` injetando cliente com modelo especializado no auditor. Adicionar a flag `--force` na CLI e rotina de auto-reparo de delimitadores em `src/mba_wiki/exporters/obsidian_writer.py` para restaurar arquivos com tags corrompidas sem descartar anotacoes pessoais.
 - **Arquivos afetados:** `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_cli.py`, `tests/test_exporters.py`.
 - **Criterio de aceite:** Testes com CLI Runner e reprocessamento com delimitadores rompidos passando com `uv run pytest tests/test_cli.py tests/test_exporters.py`, `uv run ruff check .` e `uv run mypy src/`.
+
+---
+
+## Etapa 22: Contratos de dados para transcricao e modelos Pydantic
+- **Status:** `[x]`
+- **Escopo:** Implementar `TranscriptSegment` e `VideoTranscript` em `src/mba_wiki/schemas.py` de acordo com `docs/TRANSCRIPTION_SPEC.md`, garantindo validacao de intervalos de tempo, tipagem estrita e serializacao JSON estruturada.
+- **Arquivos afetados:** `src/mba_wiki/schemas.py`, `tests/test_schemas.py`.
+- **Criterio de aceite:** Testes unitarios cobrindo criacao valida, rejeicao de timestamps invalidos e serializacao passando em `uv run pytest tests/test_schemas.py`.
+
+## Etapa 23: Auto-provisao de ambiente (FFmpeg e DLLs CUDA no Windows)
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/bootstrap.py` para verificar e provisionar dependencias de baixo nivel sem intervencao do usuario: auto-download/extracao do executavel estatico do FFmpeg para `%LOCALAPPDATA%\cathedra\bin` se ausente no sistema, adicao ao PATH dinamico, registro de diretorios de DLL NVIDIA (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) via `os.add_dll_directory` no Windows e diagnostico de suporte CUDA.
+- **Arquivos afetados:** `src/mba_wiki/transcription/bootstrap.py`, `src/mba_wiki/transcription/__init__.py`, `tests/test_bootstrap.py`.
+- **Criterio de aceite:** Testes unitarios com mocks de download e checagem de binarios passando em `uv run pytest tests/test_bootstrap.py`, `uv run ruff check .` e `uv run mypy src/`.
+
+## Etapa 24: Extrator de audio desacoplado com FFmpeg
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/audio_extractor.py` para extrair trilhas de audio de arquivos MP4 convertendo para PCM 16kHz mono WAV em diretorio temporario isolado, com tratamento de erros de codec e rotina de limpeza automatica do arquivo gerado via context manager.
+- **Arquivos afetados:** `src/mba_wiki/transcription/audio_extractor.py`, `tests/test_audio_extractor.py`.
+- **Criterio de aceite:** Testes unitarios mockando execucao de subprocesso do FFmpeg e validando parametros de comando (`-ar 16000`, `-ac 1`, `-vn`) passando em `uv run pytest tests/test_audio_extractor.py`.
+
+## Etapa 25: Normalizador deterministico de vicios de fala e disfluencias
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/cleaner.py` contendo expressoes regulares compiladas e regras lexicas para saneamento de oratoria academica em portugues (remocao de hesitacoes como "e...", "ah...", "hum...", muletas discursivas como "ne?", "tipo assim", e repeticoes imediatas de artigos/conectivos), preservando estritamente jargoes e termos tecnicos.
+- **Arquivos afetados:** `src/mba_wiki/transcription/cleaner.py`, `tests/test_cleaner.py`.
+- **Criterio de aceite:** Bateria de testes unitarios com frases tipicas de aula comprovando saneamento sem adulteracao de substancia conceitual em `uv run pytest tests/test_cleaner.py`.
+
+## Etapa 26: Motor de transcricao com faster-whisper e suporte a CUDA
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/transcriber.py` encapsulando `faster-whisper.WhisperModel`. O modulo deve configurar modelo `large-v3`, quantizacao `int8_float16` (com fallback CPU em `int8`), filtro de voz Silero VAD ativado e retorno de lista tipada de `TranscriptSegment` pareada com o normalizador da Etapa 25.
+- **Arquivos afetados:** `src/mba_wiki/transcription/transcriber.py`, `tests/test_transcriber.py`.
+- **Criterio de aceite:** Testes unitarios com mock de WhisperModel comprovando construcao correta de segmentos e integracao com o cleaner em `uv run pytest tests/test_transcriber.py`.
+
+## Etapa 27: Executor de lote com checkpoint/resume e persistencia estruturada
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/batch_runner.py` para varredura recursiva de diretorios de video, identificando subpastas por disciplina, ignorando videos com transcricoes validas ja presentes no destino (`data/raw/transcripts/`), gravando o JSON `VideoTranscript` de forma atomica e exibindo telemetria de execucao.
+- **Arquivos afetados:** `src/mba_wiki/transcription/batch_runner.py`, `tests/test_batch_runner.py`.
+- **Criterio de aceite:** Testes unitarios simulando lote de videos em `tmp_path`, verificando que arquivos ja transcritos sao pulados e novos sao persistidos em `uv run pytest tests/test_batch_runner.py`.
+
+## Etapa 28: Interface CLI utilitaria para transcricao desacoplada
+- **Status:** `[x]`
+- **Escopo:** Integrar o comando `transcribe-batch` na CLI Typer (`src/mba_wiki/cli.py`), aceitando pasta de entrada de videos, pasta de saida, modelo e dispositivo como parametros opcionais, permitindo disparo autonomo e operacao noturna.
+- **Arquivos afetados:** `src/mba_wiki/cli.py`, `tests/test_cli.py`.
+- **Criterio de aceite:** Testes com `CliRunner` validando invocacao do comando e tratamento de argumentos em `uv run pytest tests/test_cli.py`.
+
+---
+
+## Etapa 29: Ingestao multimodal (Slides + Fala) e fusao contextual no Drafter e Fact-Checker
+- **Status:** `[x]`
+- **Escopo:** Integrar `VideoTranscript` no pipeline central: (1) adicionar `transcript` opcional ao `LessonPipelineState` e `ingestion_node`/`run_lesson_pipeline`; (2) atualizar `drafter.py` e `drafter.md` para fundir os tópicos do slide com a fala real do professor; (3) atualizar `fact_checker.py` e `fact_checker.md` para considerar a fala transcrita como lastro factual primário; (4) adicionar opção `--transcript` / `-t` com auto-detecção em `build-lesson` na CLI.
+- **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/agents/graph.py`, `src/mba_wiki/agents/drafter.py`, `src/mba_wiki/agents/prompts/drafter.md`, `src/mba_wiki/agents/fact_checker.py`, `src/mba_wiki/agents/prompts/fact_checker.md`, `src/mba_wiki/cli.py`, `tests/test_graph.py`, `tests/test_drafter.py`, `tests/test_fact_checker.py`, `tests/test_cli.py`.
+- **Criterio de aceite:** Testes unitários comprovando que a presença da transcrição enriquece o rascunho sem alucinações e valida alegações factuais passando em `pytest`, `ruff` e `mypy`.
