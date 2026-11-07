@@ -16,3 +16,13 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Data directories (Medallion layers)
+data/
+data/raw/
+data/interim/
+data/processed/
+
+# Scratch & volatile files
+scratch/
+.env
