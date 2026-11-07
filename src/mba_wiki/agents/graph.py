@@ -19,6 +19,7 @@ from mba_wiki.schemas import (
     SlideChunk,
     StructuredSyllabus,
     SyllabusModule,
+    VideoTranscript,
     WikiLessonOutput,
 )
 
@@ -70,6 +71,7 @@ def create_initial_state(
     source_slide_filename: str,
     lesson_slug: str | None = None,
     full_syllabus: StructuredSyllabus | None = None,
+    transcript: VideoTranscript | None = None,
 ) -> LessonPipelineState:
     """Instantiates a fresh LessonPipelineState from in-memory slide chunks and syllabus.
 
@@ -81,6 +83,7 @@ def create_initial_state(
         source_slide_filename: Basename of the presentation file.
         lesson_slug: Optional explicit slug. Defaults to slugified lesson_title.
         full_syllabus: Optional complete StructuredSyllabus of the MBA course.
+        transcript: Optional speech transcript of the recorded lecture.
 
     Returns:
         An initialized LessonPipelineState ready for drafting.
@@ -102,6 +105,7 @@ def create_initial_state(
         slides=slides,
         syllabus=syllabus,
         full_syllabus=full_syllabus,
+        transcript=transcript,
     )
 
 
@@ -112,6 +116,8 @@ def ingestion_node(
     lesson_title: str | None = None,
     lesson_slug: str | None = None,
     full_syllabus: StructuredSyllabus | None = None,
+    transcript: VideoTranscript | None = None,
+    transcript_path: Path | None = None,
 ) -> LessonPipelineState:
     """Ingestion graph node extracting slide chunks from disk and anchoring to syllabus.
 
@@ -122,6 +128,8 @@ def ingestion_node(
         lesson_title: Optional descriptive title of the lesson theme (inferred if None).
         lesson_slug: Optional custom slug for the lesson.
         full_syllabus: Optional complete StructuredSyllabus of the MBA course.
+        transcript: Optional pre-loaded VideoTranscript instance.
+        transcript_path: Optional path to a VideoTranscript JSON file on disk.
 
     Returns:
         Initial LessonPipelineState populated with parsed slide chunks and syllabus.
@@ -132,6 +140,11 @@ def ingestion_node(
     """
     if not slide_path.is_file():
         raise FileNotFoundError(f"Slide file not found: {slide_path}")
+
+    resolved_transcript = transcript
+    if resolved_transcript is None and transcript_path is not None and transcript_path.is_file():
+        payload = transcript_path.read_text(encoding="utf-8")
+        resolved_transcript = VideoTranscript.model_validate_json(payload)
 
     slides = parse_slides(slide_path)
     fallback_title = f"Aula {lesson_number:02d}"
@@ -146,6 +159,7 @@ def ingestion_node(
         source_slide_filename=slide_path.name,
         lesson_slug=lesson_slug,
         full_syllabus=full_syllabus,
+        transcript=resolved_transcript,
     )
 
 
@@ -175,6 +189,7 @@ def finalize_output_node(
         lesson_slug=state.lesson_slug,
         processed_date=processed_date or date.today(),
         source_slide_filename=state.source_slide_filename,
+        source_transcript_filename=state.transcript.source_filename if state.transcript else None,
         fact_check_passed=state.fact_check_passed,
         removed_unsupported_claims=state.removed_unsupported_claims,
         body_markdown=final_body,

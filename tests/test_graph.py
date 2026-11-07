@@ -588,3 +588,67 @@ def test_run_lesson_pipeline_propagates_tensions_to_output(
     assert output.cross_links[0].target_discipline_slug == "estrategia"
     assert len(output.detected_tensions) == 1
     assert output.detected_tensions[0].slug == "vpl-vs-payback"
+
+
+def test_pipeline_with_transcript(
+    synthetic_graph_pdf_path: Path,
+    sample_syllabus_module: SyllabusModule,
+    fake_llm_client: FakeLLMClient,
+    tmp_path: Path,
+) -> None:
+    """Tests end-to-end pipeline execution with multimodal audio transcript integration.
+
+    Args:
+        synthetic_graph_pdf_path: Synthetic PDF slides fixture.
+        sample_syllabus_module: Standard syllabus module fixture.
+        fake_llm_client: Mock LLM client fixture.
+        tmp_path: Temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    transcript = VideoTranscript(
+        source_filename="Aula_01_Financas.mp4",
+        discipline_slug=sample_syllabus_module.discipline_slug,
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="Texto gravado da aula",
+        full_text_cleaned="O professor explicou que o VPL é a regra soberana de decisão.",
+        segments=[],
+    )
+
+    transcript_file = tmp_path / "Aula_01_Financas.json"
+    transcript_file.write_text(transcript.model_dump_json(indent=2), encoding="utf-8")
+
+    state = ingestion_node(
+        slide_path=synthetic_graph_pdf_path,
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        transcript_path=transcript_file,
+    )
+    assert state.transcript is not None
+    assert state.transcript.source_filename == "Aula_01_Financas.mp4"
+
+    draft_result = DraftResult(
+        raw_draft="O método do VPL orienta a alocação ótima de capital.",
+    )
+    fake_llm_client.add_structured_response(draft_result)
+
+    audit_response = AuditClaimsResponse(claims=[])
+    fake_llm_client.add_structured_response(audit_response)
+
+    clean_humanized = "O método do VPL orienta a alocação ótima de capital."
+    fake_llm_client.add_text_response(clean_humanized)
+
+    output = run_lesson_pipeline(state=state, client=fake_llm_client)
+
+    assert output.source_transcript_filename == "Aula_01_Financas.mp4"
