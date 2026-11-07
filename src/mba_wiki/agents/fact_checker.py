@@ -18,6 +18,7 @@ from mba_wiki.schemas import (
     LessonPipelineState,
     SlideChunk,
     SyllabusModule,
+    VideoTranscript,
 )
 
 DEFAULT_FACT_CHECKER_PROMPT_PATH = Path(__file__).parent / "prompts" / "fact_checker.md"
@@ -48,6 +49,7 @@ def format_fact_checker_user_prompt(
     syllabus: SyllabusModule,
     zettels: list[AtomicZettel] | None = None,
     tensions: list[DialecticalTension] | None = None,
+    transcript: VideoTranscript | None = None,
 ) -> str:
     """Formats contextual input payload containing draft prose and source materials.
 
@@ -57,6 +59,7 @@ def format_fact_checker_user_prompt(
         syllabus: Anchoring syllabus module with official scope and bibliography.
         zettels: Optional list of candidate atomic zettels to audit.
         tensions: Optional list of candidate dialectical tensions to audit.
+        transcript: Optional consolidated speech transcript of the recorded lecture.
 
     Returns:
         Formatted markdown string representing the prompt for the fact checker LLM.
@@ -89,7 +92,22 @@ def format_fact_checker_user_prompt(
         slides_parts.append(f"{header}\n{body}{eqs}")
     sections.append("\n\n".join(slides_parts))
 
-    # 3. Draft Text to Audit
+    # 3. Speech Transcript (if present)
+    if transcript:
+        duration_min = transcript.duration_seconds / 60
+        transcript_parts: list[str] = [
+            f"## Fonte 3: Transcrição Literal da Fala do Professor na Videoaula\n"
+            f"Duração gravada: {duration_min:.1f} minutos | "
+            f"Arquivo de origem: `{transcript.source_filename}`\n\n"
+            f"Esta transcrição contém o registro fiel da exposição oral do professor em aula. "
+            f"Alegações, dados, exemplos de mercado e explicações presentes na fala abaixo "
+            f"possuem respaldo empírico e devem ser julgadas como verificadas ('verified'), "
+            f"não devendo ser classificadas como sem suporte ('S4'):\n\n"
+            f"{transcript.full_text_cleaned}"
+        ]
+        sections.append("\n\n".join(transcript_parts))
+
+    # 4. Draft Text to Audit
     draft_sec = f"## Rascunho da Aula a ser Auditado\n\n```markdown\n{draft_text}\n```"
     sections.append(draft_sec)
 
@@ -400,6 +418,7 @@ def audit_lesson_draft(
     prompt: str | None = None,
     zettels: list[AtomicZettel] | None = None,
     tensions: list[DialecticalTension] | None = None,
+    transcript: VideoTranscript | None = None,
 ) -> FactCheckResult:
     """Performs adversarial factual audit on lesson draft text using StructuredLLMClient.
 
@@ -411,6 +430,7 @@ def audit_lesson_draft(
         prompt: Optional system prompt override. Defaults to loaded prompt.
         zettels: Optional candidate atomic zettels to audit.
         tensions: Optional candidate dialectical tensions to audit.
+        transcript: Optional consolidated speech transcript of the recorded lecture.
 
     Returns:
         FactCheckResult containing audit items, status, remediated text, and validated collections.
@@ -425,6 +445,7 @@ def audit_lesson_draft(
         syllabus=syllabus,
         zettels=zettels,
         tensions=tensions,
+        transcript=transcript,
     )
 
     response: AuditClaimsResponse = client.generate_structured(
@@ -535,6 +556,7 @@ def fact_check_node(
         client=client,
         zettels=state.extracted_zettels,
         tensions=state.detected_tensions,
+        transcript=state.transcript,
     )
 
     state.audit_items = list(result.audit_items)

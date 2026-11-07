@@ -699,3 +699,122 @@ def test_fact_check_node_purges_unsupported_zettels_and_tensions(
     assert len(updated_state.audit_items) == 3
     assert updated_state.removed_unsupported_claims >= 2
     assert updated_state.fact_check_passed is True
+
+
+def test_format_fact_checker_user_prompt_with_transcript() -> None:
+    """Tests that format_fact_checker_user_prompt includes speech transcript as Source 3.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Decisões de investimento.",
+        topics=["VPL"],
+        bibliography=["Brealey, Myers"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="VPL > 0")]
+    transcript = VideoTranscript(
+        source_filename="aula_vpl.mp4",
+        discipline_slug="financas-corporativas",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw=(
+            "O professor disse em aula que a taxa de desconto reflete o custo de oportunidade."
+        ),
+        full_text_cleaned=(
+            "A taxa de desconto reflete o custo de oportunidade do capital investido."
+        ),
+        segments=[],
+    )
+
+    prompt = format_fact_checker_user_prompt(
+        draft_text="A taxa de desconto reflete o custo de oportunidade.",
+        slides=slides,
+        syllabus=syllabus,
+        transcript=transcript,
+    )
+    assert "Fonte 3: Transcrição Literal da Fala do Professor na Videoaula" in prompt
+    assert "A taxa de desconto reflete o custo de oportunidade do capital investido." in prompt
+
+
+def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClient) -> None:
+    """Tests that fact_check_node transmits state.transcript to LLM user prompt when present.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        syllabus_summary="Decisões de investimento.",
+        topics=["VPL"],
+        bibliography=["Brealey, Myers"],
+    )
+    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="VPL > 0")]
+    transcript = VideoTranscript(
+        source_filename="aula_vpl.mp4",
+        discipline_slug="financas-corporativas",
+        duration_seconds=3600.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime.now(UTC),
+        full_text_raw="Fala gravada.",
+        full_text_cleaned="O professor mencionou o caso real da fusão Ambev em 1999.",
+        segments=[],
+    )
+    state = LessonPipelineState(
+        discipline_slug="financas-corporativas",
+        discipline_name="Finanças Corporativas",
+        lesson_number=1,
+        lesson_title="Critérios",
+        lesson_slug="criterios",
+        source_slide_filename="aula.pdf",
+        slides=slides,
+        syllabus=syllabus,
+        raw_draft="Na aula foi discutido o caso real da fusão Ambev em 1999.",
+        transcript=transcript,
+    )
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="claim-1",
+                    quote="Na aula foi discutido o caso real da fusão Ambev em 1999.",
+                    category="technical",
+                    verdict="verified",
+                )
+            ]
+        )
+    )
+
+    fact_check_node(state=state, client=fake_llm_client)
+
+    assert fake_llm_client.last_call is not None
+    user_prompt = fake_llm_client.last_call.user_prompt
+    assert "Fonte 3: Transcrição Literal da Fala do Professor na Videoaula" in user_prompt
+    assert "O professor mencionou o caso real da fusão Ambev em 1999." in user_prompt
