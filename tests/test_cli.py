@@ -914,6 +914,7 @@ def test_build_lesson_with_force_recovers_corrupted_vault(
         assert "Aula 01 processada com sucesso" in result.stdout
         content = corrupted_lesson.read_text(encoding="utf-8")
         assert "<!-- AUTO-CONTENT:START -->" in content
+        assert "Texto antigo." in content
         assert "Minha nota importante." in content
     finally:
         set_client_override(None)
