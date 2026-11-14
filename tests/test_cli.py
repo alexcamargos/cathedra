@@ -338,6 +338,7 @@ def test_build_lesson_full_success(
         "O método do VPL analisa fluxos de caixa futuros descontados à taxa de atratividade."
     )
     fake_llm_client.add_text_response(clean_prose)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
 
@@ -452,6 +453,68 @@ def test_build_lesson_saves_blocked_audit_without_changing_published_files(
     assert [call.call_type for call in fake_llm_client.calls] == ["structured", "structured"]
 
 
+def test_build_lesson_saves_final_audit_blocker(
+    tmp_path: Path,
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """The CLI retains final-audit findings and does not publish a rewritten error."""
+    vault = tmp_path / "vault"
+    syllabus_dir = vault / "00_Programa_Curso"
+    syllabus_dir.mkdir(parents=True)
+    module = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Finanças",
+        topics=[],
+        bibliography=[],
+    )
+    (syllabus_dir / "ementa_estruturada.json").write_text(
+        StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
+    )
+    fake_llm_client.add_structured_response(DraftResult(raw_draft="A taxa é 10%."))
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_text_response("A taxa é 20%.")
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C1",
+                    quote="A taxa é 20%.",
+                    category="metric",
+                    verdict="unsupported",
+                    severity="S4",
+                )
+            ]
+        )
+    )
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "build-lesson",
+            str(synthetic_cli_pdf),
+            "--discipline",
+            "financas",
+            "--lesson",
+            "1",
+            "--vault",
+            str(vault),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not (vault / "01_Wiki_Disciplinas").exists()
+    pending = vault / "03_Auditoria_Factual" / "pendentes" / "financas_Aula_01_audit.json"
+    report = LessonAuditReport.model_validate_json(pending.read_text(encoding="utf-8"))
+    assert not report.fact_check_passed
+    assert report.audit_items[0].audit_stage == "final"
+    assert report.audit_items[0].quote == "A taxa é 20%."
+
+
 def test_get_client_override(fake_llm_client: FakeLLMClient) -> None:
     """Tests set_client_override configuring active client returned by get_client.
 
@@ -552,6 +615,7 @@ def test_build_lesson_exports_dialectical_tensions(
     fake_llm_client.add_structured_response(draft_result)
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
     fake_llm_client.add_text_response("Rascunho polido de finanças corporativas.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
     set_client_override(fake_llm_client)
 
     try:
@@ -760,6 +824,7 @@ def test_build_lesson_with_force_recovers_corrupted_vault(
         AuditClaimsResponse(claims=[], overall_verdict="approved")
     )
     fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     set_client_override(fake_llm_client)
     try:
@@ -1006,6 +1071,7 @@ def test_build_lesson_with_explicit_transcript(
         AuditClaimsResponse(claims=[], overall_verdict="approved")
     )
     fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     set_client_override(fake_llm_client)
     try:

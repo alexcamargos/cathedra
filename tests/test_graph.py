@@ -149,6 +149,148 @@ def test_pipeline_stops_before_humanizer_when_factual_blocker_remains(
     assert [call.call_type for call in fake_llm_client.calls] == ["structured", "structured"]
 
 
+@pytest.mark.parametrize("artifact", ["lesson", "zettel"])
+def test_pipeline_blocks_claim_introduced_by_humanizer(
+    sample_syllabus_module: SyllabusModule, artifact: str
+) -> None:
+    """The final audit sees the exact rewritten lesson and atomic notes."""
+    state = create_initial_state(
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="A taxa é 10%.")],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="VPL",
+        source_slide_filename="aula.pdf",
+    )
+    zettel_text = "A taxa é 20%." if artifact == "zettel" else "A taxa é 10%."
+    lesson_text = "A taxa é 20%." if artifact == "lesson" else "A taxa é 10%."
+    client = FakeLLMClient(
+        structured_responses=[
+            DraftResult(
+                raw_draft="A taxa é 10%.",
+                extracted_zettels=[
+                    AtomicZettel(
+                        slug="taxa",
+                        title="Taxa",
+                        domain_tags=[],
+                        content_markdown=(
+                            "A taxa é 10%. Um. Dois. Três. Quatro."
+                            if artifact == "zettel"
+                            else "A taxa é 10%."
+                        ),
+                        related_links=[],
+                    )
+                ],
+            )
+        ],
+        text_responses=[lesson_text],
+    )
+    first_claim = ClaimAuditItem(
+        claim_id="C1",
+        quote="A taxa é 10%.",
+        category="metric",
+        verdict="verified",
+        evidence_source="Slide 1",
+    )
+    bad_claim = ClaimAuditItem(
+        claim_id="C1",
+        quote="A taxa é 20%.",
+        category="metric",
+        verdict="false",
+        severity="S1",
+        proposed_fix="A taxa é 10%.",
+    )
+    auditor = FakeLLMClient(
+        structured_responses=[
+            AuditClaimsResponse(claims=[first_claim]),
+            AuditClaimsResponse(claims=[bad_claim]),
+        ]
+    )
+    if artifact == "zettel":
+        client.add_text_response(zettel_text)
+
+    with pytest.raises(RuntimeError, match="auditoria factual"):
+        run_lesson_pipeline(state=state, client=client, auditor_client=auditor)
+
+    assert state.output is None
+    assert state.fact_check_passed is False
+    assert [item.audit_stage for item in state.audit_items] == ["draft", "final"]
+    assert state.audit_items[-1].quote == "A taxa é 20%."
+    assert len(auditor.calls) == 2
+    assert lesson_text in auditor.calls[-1].user_prompt
+    assert zettel_text in auditor.calls[-1].user_prompt
+
+
+def test_pipeline_records_initial_and_final_audits(
+    sample_syllabus_module: SyllabusModule,
+) -> None:
+    """The published text is the one sent to the final audit."""
+    state = create_initial_state(
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="A taxa é 10%.")],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="VPL",
+        source_slide_filename="aula.pdf",
+    )
+    client = FakeLLMClient(
+        structured_responses=[DraftResult(raw_draft="A taxa é 10%.")],
+        text_responses=["A taxa usada é 10%."],
+    )
+    auditor = FakeLLMClient(
+        structured_responses=[
+            AuditClaimsResponse(
+                claims=[
+                    ClaimAuditItem(
+                        claim_id="C1",
+                        quote="A taxa é 10%.",
+                        category="metric",
+                        verdict="verified",
+                    )
+                ]
+            ),
+            AuditClaimsResponse(
+                claims=[
+                    ClaimAuditItem(
+                        claim_id="C1",
+                        quote="A taxa usada é 10%.",
+                        category="metric",
+                        verdict="verified",
+                    )
+                ]
+            ),
+        ]
+    )
+
+    output = run_lesson_pipeline(state=state, client=client, auditor_client=auditor)
+
+    assert output.body_markdown == "A taxa usada é 10%."
+    assert [item.audit_stage for item in output.audit_items] == ["draft", "final"]
+    assert output.body_markdown in auditor.calls[-1].user_prompt
+
+
+def test_pipeline_does_not_publish_when_final_auditor_fails(
+    sample_syllabus_module: SyllabusModule,
+) -> None:
+    """An unavailable final auditor cannot result in an approved output."""
+    state = create_initial_state(
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="A taxa é 10%.")],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="VPL",
+        source_slide_filename="aula.pdf",
+    )
+    client = FakeLLMClient(
+        structured_responses=[DraftResult(raw_draft="A taxa é 10%.")],
+        text_responses=["A taxa usada é 10%."],
+    )
+    auditor = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[])])
+
+    with pytest.raises(RuntimeError, match="No canned response"):
+        run_lesson_pipeline(state=state, client=client, auditor_client=auditor)
+
+    assert state.output is None
+    assert not state.fact_check_passed
+
+
 def test_find_syllabus_module_by_slug(sample_syllabus_module: SyllabusModule) -> None:
     """Tests finding a module in a StructuredSyllabus by discipline slug.
 
@@ -311,6 +453,7 @@ def test_run_lesson_pipeline_end_to_end_success(
         "A técnica orienta as decisões de investimento corporativo com critério analítico."
     )
     fake_llm_client.add_text_response(clean_prose)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     test_date = date(2026, 10, 18)
     output = run_lesson_pipeline(
@@ -341,7 +484,7 @@ def test_run_lesson_pipeline_end_to_end_success(
     assert initial_state.output is output
     assert initial_state.humanized_markdown == clean_prose
     assert initial_state.humanizer_retry_count == 1
-    assert len(fake_llm_client.calls) == 3
+    assert len(fake_llm_client.calls) == 4
 
 
 def test_execute_pipeline_remediates_unsupported_claims(
@@ -396,6 +539,7 @@ def test_execute_pipeline_remediates_unsupported_claims(
         "O método do VPL constitui a base analítica das decisões de alocação de capital."
     )
     fake_llm_client.add_text_response(clean_humanized)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     final_state = execute_pipeline(state=initial_state, client=fake_llm_client)
 
@@ -613,6 +757,7 @@ def test_run_lesson_pipeline_propagates_tensions_to_output(
 
     clean_humanized = "O método do VPL orienta a alocação ótima de capital."
     fake_llm_client.add_text_response(clean_humanized)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     output = run_lesson_pipeline(state=pipeline_state, client=fake_llm_client)
 
@@ -680,6 +825,7 @@ def test_pipeline_with_transcript(
 
     clean_humanized = "O método do VPL orienta a alocação ótima de capital."
     fake_llm_client.add_text_response(clean_humanized)
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
     output = run_lesson_pipeline(state=state, client=fake_llm_client)
 
