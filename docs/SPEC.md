@@ -42,7 +42,7 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Atualiza o arquivo `_Indice_Materia.md` (MOC da disciplina) de forma idempotente sem duplicatas.
    - Grava as notas atomicas novas ou atualizadas na pasta `02_Zettelkasten/`.
    - Grava ou atualiza notas de tensao dialetica em `04_Diario_Tensoes/<tension_slug>.md` e consolida o `_Indice_Tensoes.md`.
-   - Oferece auto-recuperacao de delimitadores estruturais corrompidos caso o arquivo tenha sido adulterado manualmente.
+   - Na pagina de aula, `--force` recupera delimitadores ausentes sem descartar texto existente; marcadores duplicados ou invertidos bloqueiam a gravacao. O frontmatter existente e preservado e pode conter metadados anteriores ao reprocessamento.
 
 ## 3. Contratos de dados (Schemas Pydantic v2)
 

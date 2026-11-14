@@ -102,7 +102,12 @@ uv run mba-wiki build-lesson caminho/para/slide.pdf --discipline lideranca-estra
 Opcoes disponiveis:
 - `--transcript` ou `-t`: Caminho explicito da transcricao da videoaula (se omitido, o sistema busca automaticamente em `data/raw/transcripts/<disciplina>/`).
 - `--title`: Titulo descritivo da aula (caso nao venha do primeiro slide).
-- `--force`: Forca sobrescrita de delimitadores estruturais e reprocessamento.
+- `--force`: Permite tentar recuperar delimitadores ausentes durante o reprocessamento.
+
+Em paginas de aula existentes, o reprocessamento preserva o frontmatter e as anotacoes fora do
+bloco automatico; o frontmatter pode continuar com metadados da criacao. Se faltarem marcadores,
+`--force` preserva o texto anterior e acrescenta um novo bloco, que pode exigir revisao manual.
+Marcadores duplicados ou invertidos exigem correcao manual.
 
 Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e publicada.
 O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
