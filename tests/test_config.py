@@ -7,7 +7,7 @@ import pytest
 from mba_wiki.config import Settings, get_settings
 
 
-def test_default_settings() -> None:
+def test_default_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests default settings values when no environment variables are set.
 
     Args:
@@ -19,7 +19,17 @@ def test_default_settings() -> None:
     Raises:
         None.
     """
-    settings = Settings()
+    for name in (
+        "OBSIDIAN_VAULT_PATH",
+        "SYLLABUS_JSON_PATH",
+        "LLM_BACKEND",
+        "LLM_PROVIDER",
+        "LLM_MODEL_DRAFTER",
+        "LLM_MODEL_AUDITOR",
+        "GEMINI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
     assert settings.obsidian_vault_path == Path("vault_mba")
     assert settings.syllabus_json_path is None
     assert settings.llm_provider == "gemini"
