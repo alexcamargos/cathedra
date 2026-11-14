@@ -9,6 +9,8 @@ Localizacao: `01_Wiki_Disciplinas/<discipline_slug>/_Indice_Materia.md`
 
 Para garantir idempotencia ao adicionar novas aulas, o script substitui apenas o conteudo entre os marcadores `<!-- AUTO-LESSONS:START -->` e `<!-- AUTO-LESSONS:END -->`, preservando qualquer anotacao manual fora deles.
 
+Quando um marcador estiver ausente, `--force` preserva o texto existente e acrescenta um novo bloco. Marcadores duplicados ou invertidos interrompem a escrita; links antigos fora do bloco podem precisar de revisao manual.
+
 ```markdown
 ---
 type: moc_disciplina
@@ -101,6 +103,8 @@ Localizacao: `02_Zettelkasten/<slug>.md`
 
 Se o arquivo ja existir, o exportador preserva `content_markdown` e `domain_tags` existentes, une sem duplicatas novas tags em `tags` e acrescenta a aula atual na secao `## Referencias no Curso`.
 
+O frontmatter e as anotacoes na secao de conexoes sao preservados; novas tags sao mescladas quando `tags` usa a lista em linhas do template. Formatos alternativos de tags nao sao reescritos. Na recuperacao de marcadores ausentes, o texto existente e mantido; marcadores duplicados ou invertidos bloqueiam a escrita.
+
 ```markdown
 ---
 type: zettel
@@ -133,6 +137,8 @@ tags:
 Localizacao: `04_Diario_Tensoes/<tension_slug>.md`
 
 Se o arquivo ja existir, o exportador preserva o cabecalho conceitual e sintetico da tensao e acumula novas evidencias na secao `## Manifestacoes e Evidencias no Curso` de forma idempotente, resguardando tambem anotacoes pessoais.
+
+Os blocos automaticos de conceitos e evidencias sao validados separadamente. Marcadores ausentes podem ser recuperados com `--force`, preservando o texto existente; pares duplicados, invertidos ou sobrepostos bloqueiam a escrita.
 
 ```markdown
 ---
@@ -175,6 +181,8 @@ tags:
 Localizacao: `04_Diario_Tensoes/_Indice_Tensoes.md`
 
 Consolida todas as tensoes dialeticas rastreadas no cofre, gerado ou atualizado pelo comando `sync-tensions` ou ao fim de cada pipeline de aula.
+
+Se faltarem marcadores, `--force` acrescenta um novo bloco preservando o texto existente. Pares duplicados ou invertidos bloqueiam a escrita.
 
 ```markdown
 ---

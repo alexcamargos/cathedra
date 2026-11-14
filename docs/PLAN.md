@@ -216,3 +216,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Preservar todo o conteudo externo ao bloco automatico da aula, recuperar marcadores ausentes sem descartar texto existente e rejeitar marcadores duplicados ou invertidos mesmo com `--force`.
 - **Arquivos afetados:** `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_exporters.py`, `tests/test_cli.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 35: Protecao dos demais arquivos e gravacao do cofre
+- **Status:** `[x]`
+- **Escopo:** Preservar conteudo manual em indices, Zettels e tensoes; validar delimitadores e recuperar blocos ausentes sem apagar notas; preparar artefatos em area separada e restaurar arquivos quando houver falha durante a substituicao, preservando copias se a restauracao nao for segura.
+- **Arquivos afetados:** `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_exporters.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
