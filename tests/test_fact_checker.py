@@ -28,6 +28,113 @@ from mba_wiki.schemas import (
 from tests.conftest import FakeLLMClient
 
 
+@pytest.mark.parametrize(
+    ("kind", "locator", "excerpt", "expected"),
+    [
+        ("slide", 1, "A taxa é 10%.", True),
+        ("slide", 2, "A taxa é 10%.", False),
+        ("slide", 1, "A taxa é 20%.", False),
+        (None, None, None, False),
+        ("syllabus", None, "Livro de Finanças", False),
+    ],
+)
+def test_verified_claim_requires_located_material_evidence(
+    kind: str | None,
+    locator: int | None,
+    excerpt: str | None,
+    expected: bool,
+) -> None:
+    """An LLM verdict or an unconsulted book title alone cannot establish support."""
+    syllabus = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Investimento.",
+        topics=["VPL"],
+        bibliography=["Livro de Finanças"],
+    )
+    claim = ClaimAuditItem.model_validate(
+        {
+            "claim_id": "C1",
+            "quote": "A taxa é 10%.",
+            "category": "metric",
+            "verdict": "verified",
+            "evidence_source": "Livro de Finanças",
+            "evidence_kind": kind,
+            "evidence_locator": locator,
+            "evidence_quote": excerpt,
+            "evidence_status": "material_supported",
+        }
+    )
+    client = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[claim])])
+    result = audit_lesson_draft(
+        draft_text="A taxa é 10%.",
+        slides=[SlideChunk(slide_number=1, title="Taxa", raw_text="A taxa é 10%.")],
+        syllabus=syllabus,
+        client=client,
+    )
+    item = result.audit_items[0]
+    assert result.fact_check_passed is expected
+    assert item.evidence_status == ("material_supported" if expected else "pending_review")
+    assert item.evidence_source == ("Slide 1" if expected else None)
+
+
+def test_transcript_evidence_identifies_segment_and_timestamps() -> None:
+    """A matching transcript excerpt is traceable without implying independent confirmation."""
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import TranscriptSegment, VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Investimento.",
+        topics=[],
+        bibliography=[],
+    )
+    segment = TranscriptSegment(
+        id=7,
+        start=12.0,
+        end=16.0,
+        text_raw="A taxa é 10%.",
+        text_cleaned="A taxa é 10%.",
+    )
+    transcript = VideoTranscript(
+        source_filename="aula.mp4",
+        discipline_slug="financas",
+        duration_seconds=20,
+        model_name="teste",
+        compute_type="int8",
+        processed_at=datetime.now(UTC),
+        full_text_raw=segment.text_raw,
+        full_text_cleaned=segment.text_cleaned,
+        segments=[segment],
+    )
+    claim = ClaimAuditItem.model_validate(
+        {
+            "claim_id": "C1",
+            "quote": "A taxa é 10%.",
+            "category": "metric",
+            "verdict": "verified",
+            "evidence_kind": "transcript",
+            "evidence_locator": 7,
+            "evidence_quote": "A taxa é 10%.",
+        }
+    )
+    client = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[claim])])
+    result = audit_lesson_draft(
+        draft_text="A taxa é 10%.",
+        slides=[],
+        syllabus=syllabus,
+        client=client,
+        transcript=transcript,
+    )
+    assert result.fact_check_passed
+    assert result.audit_items[0].evidence_status == "material_supported"
+    assert result.audit_items[0].evidence_source == "Transcrição aula.mp4, segmento 7 (12.0s–16.0s)"
+    assert client.last_call is not None
+    assert "segmento 7" in client.last_call.user_prompt.lower()
+
+
 def test_get_fact_checker_prompt_loads_from_markdown() -> None:
     """Tests that the fact checker system prompt loads dynamically from its markdown file.
 
@@ -234,7 +341,7 @@ def test_audit_lesson_draft_with_fake_llm(fake_llm_client: FakeLLMClient) -> Non
         SlideChunk(
             slide_number=1,
             title="Avaliação de Investimento",
-            raw_text="Aceitar VPL > 0.",
+            raw_text="Aceitar VPL > 0. O VPL é uma ferramenta confiável.",
         )
     ]
     draft_text = (
@@ -247,6 +354,9 @@ def test_audit_lesson_draft_with_fake_llm(fake_llm_client: FakeLLMClient) -> Non
         quote="O VPL é uma ferramenta confiável.",
         category="technical",
         verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="O VPL é uma ferramenta confiável.",
     )
     unsupported_item = ClaimAuditItem(
         claim_id="claim-02",
@@ -293,7 +403,13 @@ def test_fact_check_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) 
         topics=["VPL"],
         bibliography=["Brealey"],
     )
-    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Regra VPL > 0")]
+    slides = [
+        SlideChunk(
+            slide_number=1,
+            title="VPL",
+            raw_text="O VPL desconta fluxos à taxa de custo de capital.",
+        )
+    ]
     raw_draft = (
         "O VPL desconta fluxos à taxa de custo de capital. "
         "Segundo lendas medievais, dragões financiavam reis com taxas Selic negativas."
@@ -316,6 +432,9 @@ def test_fact_check_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) 
         quote="O VPL desconta fluxos à taxa de custo de capital.",
         category="technical",
         verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="O VPL desconta fluxos à taxa de custo de capital.",
     )
     claim_dragons = ClaimAuditItem(
         claim_id="c2",
@@ -587,7 +706,7 @@ def test_format_fact_checker_user_prompt_includes_zettels_and_tensions() -> None
         tensions=[tension],
     )
 
-    assert "## Fonte 1: Ementa e Bibliografia Oficial da Disciplina" in prompt
+    assert "## Fonte 1: Ementa estruturada e lista bibliográfica não consultada" in prompt
     assert "## Fonte 2: Conteúdo Literal dos Slides da Aula" in prompt
     assert "## Rascunho da Aula a ser Auditado" in prompt
     assert "## Conceitos Atômicos (Zettels) a serem Auditados" in prompt
@@ -617,7 +736,13 @@ def test_fact_check_node_purges_unsupported_zettels_and_tensions(
         topics=["VPL"],
         bibliography=["Brealey"],
     )
-    slides = [SlideChunk(slide_number=1, title="VPL", raw_text="Regra VPL > 0")]
+    slides = [
+        SlideChunk(
+            slide_number=1,
+            title="VPL",
+            raw_text="O VPL desconta fluxos à taxa de custo de capital.",
+        )
+    ]
 
     valid_zettel = AtomicZettel(
         slug="vpl-valido",
@@ -681,6 +806,9 @@ def test_fact_check_node_purges_unsupported_zettels_and_tensions(
         quote="O VPL desconta fluxos à taxa de custo de capital.",
         category="technical",
         verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="O VPL desconta fluxos à taxa de custo de capital.",
     )
 
     fake_llm_client.add_structured_response(
@@ -747,7 +875,7 @@ def test_format_fact_checker_user_prompt_with_transcript() -> None:
         syllabus=syllabus,
         transcript=transcript,
     )
-    assert "Fonte 3: Transcrição Literal da Fala do Professor na Videoaula" in prompt
+    assert "Fonte 3: Transcrição da Fala do Professor na Videoaula" in prompt
     assert "A taxa de desconto reflete o custo de oportunidade do capital investido." in prompt
 
 
@@ -816,5 +944,5 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
 
     assert fake_llm_client.last_call is not None
     user_prompt = fake_llm_client.last_call.user_prompt
-    assert "Fonte 3: Transcrição Literal da Fala do Professor na Videoaula" in user_prompt
+    assert "Fonte 3: Transcrição da Fala do Professor na Videoaula" in user_prompt
     assert "O professor mencionou o caso real da fusão Ambev em 1999." in user_prompt
