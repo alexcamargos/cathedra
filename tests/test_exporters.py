@@ -5,6 +5,7 @@ lesson wiki pages (Aula_NN_slug.md), Zettelkasten atomic notes, and factual audi
 """
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -105,6 +106,267 @@ def sample_lesson_output() -> WikiLessonOutput:
         extracted_zettels=[zettel],
         audit_items=[claim],
     )
+
+
+@pytest.fixture
+def sample_tension() -> DialecticalTension:
+    return DialecticalTension(
+        slug="controle-vs-autonomia",
+        title="Controle vs Autonomia",
+        pole_a_discipline="financas",
+        pole_a_framework="Controle",
+        pole_a_thesis="Controlar.",
+        pole_b_discipline="inovacao",
+        pole_b_framework="Autonomia",
+        pole_b_thesis="Delegar.",
+        tension_nature="Controle vs velocidade",
+        synthesis_guidelines="Conciliar.",
+        related_zettel_slugs=["vpl"],
+    )
+
+
+def test_zettel_update_preserves_custom_frontmatter_and_direct_link_notes(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    zettel = sample_lesson_output.extracted_zettels[0]
+    path = write_atomic_zettel(tmp_path, zettel, sample_lesson_output)
+    original = path.read_text(encoding="utf-8")
+    original = original.replace("tags:\n", "custom: meu valor\ntags:\n")
+    original = original.replace("## Conexoes Diretas\n", "## Conexoes Diretas\nNota minha.\n")
+    path.write_text(original, encoding="utf-8")
+    update = zettel.model_copy(update={"domain_tags": ["nova-tag"], "related_links": ["outro"]})
+
+    write_atomic_zettel(tmp_path, update, sample_lesson_output)
+    updated = path.read_text(encoding="utf-8")
+    assert "custom: meu valor" in updated
+    assert "Nota minha." in updated
+    assert "nova-tag" in updated
+    assert "[[outro]]" in updated
+
+
+def _write_sample_vault_file(
+    kind: str,
+    root: Path,
+    syllabus: SyllabusModule,
+    output: WikiLessonOutput,
+    tension: DialecticalTension,
+) -> Path:
+    if kind == "index":
+        return write_discipline_index(root, syllabus, output, force=True)
+    if kind == "zettel":
+        return write_atomic_zettel(root, output.extracted_zettels[0], output, force=True)
+    if kind == "tension":
+        return write_dialectical_tension(root, tension, output, force=True)
+    return write_tensions_index(root, [tension], force=True)
+
+
+@pytest.mark.parametrize("kind", ["index", "zettel", "tension", "tensions_index"])
+def test_force_recovery_preserves_other_vault_files(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    sample_tension: DialecticalTension,
+    kind: str,
+) -> None:
+    """Missing markers must not delete content; repeating recovery is idempotent."""
+
+    def writer() -> Path:
+        return _write_sample_vault_file(
+            kind, tmp_path, sample_syllabus, sample_lesson_output, sample_tension
+        )
+
+    path = writer()
+    original = (
+        "# Nota existente\n\nTexto anterior insubstituível.\n\n"
+        "## Referencias no Curso\nObservação pessoal.\n"
+    )
+    path.write_text(original, encoding="utf-8")
+
+    writer()
+    healed = path.read_text(encoding="utf-8")
+    remaining = iter(healed)
+    assert all(any(char == expected for char in remaining) for expected in original)
+    writer()
+    assert path.read_text(encoding="utf-8") == healed
+
+
+@pytest.mark.parametrize("kind", ["index", "zettel", "tension", "tensions_index"])
+@pytest.mark.parametrize("mode", ["inverted", "duplicated"])
+def test_other_vault_files_reject_inverted_markers_without_writes(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    sample_tension: DialecticalTension,
+    kind: str,
+    mode: str,
+) -> None:
+    def writer() -> Path:
+        return _write_sample_vault_file(
+            kind, tmp_path, sample_syllabus, sample_lesson_output, sample_tension
+        )
+
+    markers = {
+        "index": "<!-- AUTO-LESSONS:END -->\n<!-- AUTO-LESSONS:START -->",
+        "zettel": "<!-- AUTO-BACKLINKS:END -->\n<!-- AUTO-BACKLINKS:START -->",
+        "tension": "<!-- AUTO-ZETTELS:END -->\n<!-- AUTO-ZETTELS:START -->",
+        "tensions_index": "<!-- AUTO-TENSIONS:END -->\n<!-- AUTO-TENSIONS:START -->",
+    }[kind]
+    if mode == "duplicated":
+        markers = markers.replace(":END -->", ":START -->")
+    path = writer()
+    original = f"Nota do usuário.\n{markers}\nOutra nota.\n"
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(ValueError, match="[Dd]elimit"):
+        writer()
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_tension_rejects_overlapping_blocks(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+    sample_tension: DialecticalTension,
+) -> None:
+    path = write_dialectical_tension(tmp_path, sample_tension, sample_lesson_output)
+    original = (
+        "Nota do usuário.\n<!-- AUTO-ZETTELS:START -->\n<!-- AUTO-EVIDENCES:START -->\n"
+        "<!-- AUTO-ZETTELS:END -->\n<!-- AUTO-EVIDENCES:END -->\n"
+    )
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(ValueError, match="[Dd]elimit"):
+        write_dialectical_tension(tmp_path, sample_tension, sample_lesson_output, force=True)
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_export_staging_failure_leaves_existing_vault_unchanged(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure generating a later artifact must not publish an earlier one."""
+    initial = export_lesson_to_vault(tmp_path, sample_lesson_output, sample_syllabus)
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    changed = sample_lesson_output.model_copy(update={"body_markdown": "Corpo novo."})
+
+    def fail_audit(*args: object, **kwargs: object) -> Path:
+        raise OSError("Falha simulada ao preparar auditoria")
+
+    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.write_audit_report", fail_audit)
+    with pytest.raises(OSError, match="Falha simulada"):
+        export_lesson_to_vault(tmp_path, changed, sample_syllabus)
+    assert initial.lesson_path.read_bytes() == before[initial.lesson_path]
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+def test_export_aborts_if_user_edits_file_during_preparation(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An edit made during staging must not be replaced by the pending export."""
+    initial = export_lesson_to_vault(tmp_path, sample_lesson_output, sample_syllabus)
+    original_writer = write_audit_report
+
+    def edit_during_audit(vault_root: Path, output: WikiLessonOutput) -> Path:
+        result = original_writer(vault_root, output)
+        initial.lesson_path.write_text("Alteração do usuário", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.write_audit_report", edit_during_audit)
+    changed = sample_lesson_output.model_copy(update={"body_markdown": "Corpo novo."})
+    with pytest.raises(RuntimeError, match="changed during export"):
+        export_lesson_to_vault(tmp_path, changed, sample_syllabus)
+    assert initial.lesson_path.read_text(encoding="utf-8") == "Alteração do usuário"
+
+
+def test_export_commit_failure_restores_previous_files(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed replacement rolls back files already installed in the vault."""
+    export_lesson_to_vault(tmp_path, sample_lesson_output, sample_syllabus)
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    changed = sample_lesson_output.model_copy(update={"body_markdown": "Corpo novo."})
+    original_replace = os.replace
+    calls = 0
+
+    def fail_second_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        nonlocal calls
+        if Path(dst).resolve().is_relative_to(tmp_path.resolve()):
+            calls += 1
+            if calls == 2:
+                raise OSError("Falha simulada na substituição")
+        original_replace(src, dst)
+
+    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_second_replace)
+    with pytest.raises(OSError, match="Falha simulada"):
+        export_lesson_to_vault(tmp_path, changed, sample_syllabus)
+    assert calls >= 2
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+def test_export_rollback_does_not_overwrite_concurrent_edit(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rollback must preserve a user's edit made after a file was installed."""
+    result = export_lesson_to_vault(tmp_path, sample_lesson_output, sample_syllabus)
+    changed = sample_lesson_output.model_copy(update={"body_markdown": "Corpo novo."})
+    original_replace = os.replace
+    calls = 0
+
+    def fail_after_concurrent_edit(
+        src: str | os.PathLike[str], dst: str | os.PathLike[str]
+    ) -> None:
+        nonlocal calls
+        if Path(dst).resolve().is_relative_to(tmp_path.resolve()):
+            calls += 1
+            if calls == 2:
+                result.lesson_path.write_text("Edição simultânea do usuário", encoding="utf-8")
+                raise OSError("Falha simulada")
+        original_replace(src, dst)
+
+    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_after_concurrent_edit)
+    with pytest.raises(RuntimeError, match="backups retained"):
+        export_lesson_to_vault(tmp_path, changed, sample_syllabus)
+    assert result.lesson_path.read_text(encoding="utf-8") == "Edição simultânea do usuário"
+
+
+def test_export_rejects_slug_with_path_traversal(
+    tmp_path: Path,
+    sample_syllabus: SyllabusModule,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    bad_zettel = sample_lesson_output.extracted_zettels[0].model_copy(update={"slug": "../fora"})
+    output = sample_lesson_output.model_copy(update={"extracted_zettels": [bad_zettel]})
+    with pytest.raises(ValueError, match="slug"):
+        export_lesson_to_vault(tmp_path, output, sample_syllabus)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_single_tensions_index_write_is_atomic_on_failure(
+    tmp_path: Path,
+    sample_tension: DialecticalTension,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = write_tensions_index(tmp_path, [sample_tension])
+    before = path.read_bytes()
+    other = sample_tension.model_copy(update={"slug": "outro", "title": "Outro"})
+
+    def fail_replace(src: object, dst: object) -> None:
+        raise OSError("Falha simulada na escrita")
+
+    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_replace)
+    with pytest.raises(OSError, match="Falha simulada"):
+        write_tensions_index(tmp_path, [sample_tension, other])
+    assert path.read_bytes() == before
+    assert sorted(path.parent.iterdir()) == [path]
 
 
 def test_export_rejects_failed_audit_before_any_write(

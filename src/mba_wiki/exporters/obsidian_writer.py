@@ -5,7 +5,10 @@ notes, and factual audit JSON reports while preserving manual human notes and pr
 link duplication across re-runs.
 """
 
+import os
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -69,6 +72,44 @@ class VaultExportResult:
     tensions_index_path: Path | None = None
 
 
+def _ensure_managed_block(
+    content: str, start: str, end: str, path: Path, force: bool, initial: str
+) -> str:
+    """Validate delimiters or append a new block without deleting existing text."""
+    start_count = content.count(start)
+    end_count = content.count(end)
+    if (
+        start_count > 1
+        or end_count > 1
+        or (start_count == end_count == 1 and content.find(start) > content.find(end))
+    ):
+        raise ValueError(f"Delimiters are duplicated or out of order in {path}")
+    if start_count == end_count == 1:
+        return content
+    if not force:
+        raise ValueError(f"Delimiters '{start}' and '{end}' not found in {path}")
+    preserved = content.replace(start, "", 1).replace(end, "", 1)
+    return f"{preserved}\n\n{start}\n{initial}\n{end}\n"
+
+
+def _write_text_atomically(path: Path, content: str) -> None:
+    """Replace a single file only after its complete contents have been written."""
+    if path.is_symlink():
+        raise ValueError(f"Symlink is not supported in vault export: {path}")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+        if path.exists():
+            shutil.copymode(path, temporary_path)
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def write_discipline_index(
     vault_root: Path,
     syllabus: SyllabusModule,
@@ -123,34 +164,15 @@ def write_discipline_index(
             "## Bibliografia Oficial\n"
             f"{bib_lines}\n"
         )
-        index_path.write_text(content, encoding="utf-8")
+        _write_text_atomically(index_path, content)
         return index_path
 
     existing_content = index_path.read_text(encoding="utf-8")
-    start_idx = existing_content.find(AUTO_LESSONS_START)
-    end_idx = existing_content.find(AUTO_LESSONS_END)
-
-    if start_idx == -1 or end_idx == -1:
-        if not force:
-            raise ValueError(
-                f"Delimiters '{AUTO_LESSONS_START}' and '{AUTO_LESSONS_END}' "
-                f"not found in {index_path}"
-            )
-        # Auto-heal: Recreate delimiters while preserving manual content
-        if "## Aulas Processadas" in existing_content:
-            pattern = re.compile(r"## Aulas Processadas.*?(?=\n## |\Z)", re.DOTALL)
-            healed = (
-                f"## Aulas Processadas\n{AUTO_LESSONS_START}\n{lesson_entry}\n{AUTO_LESSONS_END}\n"
-            )
-            updated_content = pattern.sub(healed, existing_content)
-        else:
-            updated_content = (
-                existing_content.rstrip()
-                + f"\n\n## Aulas Processadas\n{AUTO_LESSONS_START}\n{lesson_entry}\n"
-                f"{AUTO_LESSONS_END}\n"
-            )
-        index_path.write_text(updated_content, encoding="utf-8")
-        return index_path
+    existing_content = _ensure_managed_block(
+        existing_content, AUTO_LESSONS_START, AUTO_LESSONS_END, index_path, force, lesson_entry
+    )
+    start_idx = existing_content.index(AUTO_LESSONS_START)
+    end_idx = existing_content.index(AUTO_LESSONS_END)
 
     before_block = existing_content[: start_idx + len(AUTO_LESSONS_START)]
     inside_block = existing_content[start_idx + len(AUTO_LESSONS_START) : end_idx]
@@ -171,7 +193,7 @@ def write_discipline_index(
     new_lessons_content = "\n" + "\n".join(lesson_map[n] for n in sorted_numbers) + "\n"
 
     updated_content = f"{before_block}{new_lessons_content}{after_block}"
-    index_path.write_text(updated_content, encoding="utf-8")
+    _write_text_atomically(index_path, updated_content)
     return index_path
 
 
@@ -253,7 +275,7 @@ def write_lesson_page(
             "## Notas Pessoais de Aula\n"
             "<!-- Espaco preservado em reprocessamentos -->\n"
         )
-        lesson_path.write_text(content, encoding="utf-8")
+        _write_text_atomically(lesson_path, content)
         return lesson_path
 
     existing_content = lesson_path.read_text(encoding="utf-8")
@@ -274,13 +296,13 @@ def write_lesson_page(
         preserved = existing_content.replace(AUTO_CONTENT_START, "", 1)
         preserved = preserved.replace(AUTO_CONTENT_END, "", 1)
         updated_content = f"{preserved}\n\n{AUTO_CONTENT_START}\n{auto_body}\n{AUTO_CONTENT_END}\n"
-        lesson_path.write_text(updated_content, encoding="utf-8")
+        _write_text_atomically(lesson_path, updated_content)
         return lesson_path
 
     before_block = existing_content[: start_idx + len(AUTO_CONTENT_START)]
     after_block = existing_content[end_idx:]
     updated_content = f"{before_block}\n{auto_body}\n{after_block}"
-    lesson_path.write_text(updated_content, encoding="utf-8")
+    _write_text_atomically(lesson_path, updated_content)
     return lesson_path
 
 
@@ -335,64 +357,37 @@ def write_atomic_zettel(
             f"{lesson_backlink}\n"
             f"{AUTO_BACKLINKS_END}\n"
         )
-        zettel_path.write_text(content, encoding="utf-8")
+        _write_text_atomically(zettel_path, content)
         return zettel_path
 
     existing_content = zettel_path.read_text(encoding="utf-8")
-    start_idx = existing_content.find(AUTO_BACKLINKS_START)
-    end_idx = existing_content.find(AUTO_BACKLINKS_END)
-
-    if start_idx == -1 or end_idx == -1:
-        if not force:
-            raise ValueError(
-                f"Delimiters '{AUTO_BACKLINKS_START}' and '{AUTO_BACKLINKS_END}' "
-                f"not found in {zettel_path}"
-            )
-        if "## Referencias no Curso" in existing_content:
-            pattern = re.compile(r"## Referencias no Curso.*?(?=\n## |\Z)", re.DOTALL)
-            healed_block = (
-                f"## Referencias no Curso\n{AUTO_BACKLINKS_START}\n"
-                f"{lesson_backlink}\n{AUTO_BACKLINKS_END}\n"
-            )
-            updated_content = pattern.sub(healed_block, existing_content)
-        else:
-            updated_content = (
-                existing_content.rstrip() + f"\n\n## Referencias no Curso\n{AUTO_BACKLINKS_START}\n"
-                f"{lesson_backlink}\n{AUTO_BACKLINKS_END}\n"
-            )
-        zettel_path.write_text(updated_content, encoding="utf-8")
-        return zettel_path
+    existing_content = _ensure_managed_block(
+        existing_content,
+        AUTO_BACKLINKS_START,
+        AUTO_BACKLINKS_END,
+        zettel_path,
+        force,
+        lesson_backlink,
+    )
+    start_idx = existing_content.index(AUTO_BACKLINKS_START)
+    end_idx = existing_content.index(AUTO_BACKLINKS_END)
 
     # 1. Merge domain tags into frontmatter without duplicates
     fm_match = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", existing_content, re.DOTALL)
-    existing_tags: list[str] = []
+    body_and_links = existing_content[:start_idx]
     if fm_match:
         fm_text = fm_match.group(1)
-        tags_section = re.search(r"tags:\r?\n((?:\s+-\s+[^\n]+\r?\n?)+)", fm_text)
+        tags_section = re.search(r"(?m)^tags:[ \t]*\n((?:[ \t]+-[ \t]+[^\n]+\n?)*)", fm_text)
         if tags_section:
-            for line in tags_section.group(1).splitlines():
-                t = line.strip().lstrip("-").strip()
-                if t and t not in existing_tags:
-                    existing_tags.append(t)
-
-    for new_tag in zettel.domain_tags:
-        if new_tag not in existing_tags:
-            existing_tags.append(new_tag)
-
-    merged_tags_str = "\n".join(f"  - {tag}" for tag in existing_tags)
-    new_fm = (
-        "---\n"
-        "type: zettel\n"
-        f'slug: "{escape_yaml_str(zettel.slug)}"\n'
-        f'title: "{escape_yaml_str(zettel.title)}"\n'
-        "tags:\n"
-        f"{merged_tags_str}\n"
-        "---\n"
-    )
-
-    body_and_links = (
-        existing_content[fm_match.end() : start_idx] if fm_match else existing_content[:start_idx]
-    )
+            existing_tags = {
+                line.strip().lstrip("-").strip() for line in tags_section.group(1).splitlines()
+            }
+            missing_tags = [tag for tag in zettel.domain_tags if tag not in existing_tags]
+            if missing_tags:
+                insert_at = fm_match.start(1) + tags_section.end(1)
+                prefix = "" if body_and_links[:insert_at].endswith("\n") else "\n"
+                addition = prefix + "".join(f"  - {tag}\n" for tag in missing_tags)
+                body_and_links = body_and_links[:insert_at] + addition + body_and_links[insert_at:]
 
     # Merge related_links into ## Conexoes Diretas
     conexoes_match = re.search(
@@ -403,18 +398,14 @@ def write_atomic_zettel(
         existing_direct_links = re.findall(
             r"- \[\[([^\]|]+)(?:\|[^\]]+)?\]\]", conexoes_match.group(1)
         )
-        merged_direct_links = list(existing_direct_links)
-        for link in zettel.related_links:
-            if link not in merged_direct_links:
-                merged_direct_links.append(link)
-        new_conexoes_block = "## Conexoes Diretas\n" + "\n".join(
-            f"- [[{link_slug}]]" for link_slug in merged_direct_links
-        )
-        body_and_links = (
-            body_and_links[: conexoes_match.start()]
-            + new_conexoes_block
-            + body_and_links[conexoes_match.end() :]
-        )
+        new_links = [link for link in zettel.related_links if link not in existing_direct_links]
+        if new_links:
+            insertion = "\n" + "\n".join(f"- [[{link}]]" for link in new_links)
+            body_and_links = (
+                body_and_links[: conexoes_match.end()]
+                + insertion
+                + body_and_links[conexoes_match.end() :]
+            )
     elif zettel.related_links:
         ref_idx = body_and_links.find("## Referencias no Curso")
         new_conexoes_block = (
@@ -441,10 +432,8 @@ def write_atomic_zettel(
     new_backlinks_content = "\n" + "\n".join(existing_backlinks) + "\n"
     after_block = existing_content[end_idx:]
 
-    updated_content = (
-        f"{new_fm}{body_and_links}{AUTO_BACKLINKS_START}{new_backlinks_content}{after_block}"
-    )
-    zettel_path.write_text(updated_content, encoding="utf-8")
+    updated_content = f"{body_and_links}{AUTO_BACKLINKS_START}{new_backlinks_content}{after_block}"
+    _write_text_atomically(zettel_path, updated_content)
     return zettel_path
 
 
@@ -466,7 +455,7 @@ def write_blocked_audit_report(vault_root: Path, state: LessonPipelineState) -> 
     directory = vault_root / "03_Auditoria_Factual" / "pendentes"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{state.discipline_slug}_Aula_{state.lesson_number:02d}_audit.json"
-    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    _write_text_atomically(path, report.model_dump_json(indent=2))
     return path
 
 
@@ -503,11 +492,11 @@ def write_audit_report(
         audit_items=output.audit_items,
     )
 
-    report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    _write_text_atomically(report_path, report.model_dump_json(indent=2))
     return report_path
 
 
-def export_lesson_to_vault(
+def _write_lesson_artifacts(
     vault_root: Path,
     output: WikiLessonOutput,
     syllabus: SyllabusModule,
@@ -573,6 +562,134 @@ def export_lesson_to_vault(
         tension_paths=tension_paths,
         tensions_index_path=tensions_index_path,
     )
+
+
+def _artifact_paths(output: WikiLessonOutput, syllabus: SyllabusModule) -> list[Path]:
+    """Compute the complete set of relative paths touched by an export."""
+    slugs = [output.discipline_slug, syllabus.discipline_slug, output.lesson_slug]
+    slugs.extend(zettel.slug for zettel in output.extracted_zettels)
+    slugs.extend(tension.slug for tension in output.detected_tensions)
+    if any(not slug or slug in {".", ".."} or any(c in slug for c in "/\\:") for slug in slugs):
+        raise ValueError("Invalid slug in vault export")
+    if output.discipline_slug != syllabus.discipline_slug:
+        raise ValueError("Discipline mismatch in vault export")
+    if any(tension.slug.casefold() == "_indice_tensoes" for tension in output.detected_tensions):
+        raise ValueError("Tension slug conflicts with index")
+    discipline = Path("01_Wiki_Disciplinas") / output.discipline_slug
+    paths = [
+        discipline / f"Aula_{output.lesson_number:02d}_{output.lesson_slug}.md",
+        discipline / "_Indice_Materia.md",
+        *(Path("02_Zettelkasten") / f"{z.slug}.md" for z in output.extracted_zettels),
+        Path("03_Auditoria_Factual")
+        / f"{output.discipline_slug}_Aula_{output.lesson_number:02d}_audit.json",
+        *(Path("04_Diario_Tensoes") / f"{t.slug}.md" for t in output.detected_tensions),
+    ]
+    if output.detected_tensions:
+        paths.append(Path("04_Diario_Tensoes") / "_Indice_Tensoes.md")
+    return list(dict.fromkeys(paths))
+
+
+def _check_safe_target(vault_root: Path, relative: Path) -> Path:
+    """Reject symlinks and paths outside the vault before reading or replacing files."""
+    target = vault_root / relative
+    if not target.resolve().is_relative_to(vault_root.resolve()):
+        raise ValueError(f"Vault path escapes root: {target}")
+    current = vault_root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"Symlink is not supported in vault export: {current}")
+    if target.exists() and not target.is_file():
+        raise ValueError(f"Vault target is not a regular file: {target}")
+    return target
+
+
+def export_lesson_to_vault(
+    vault_root: Path,
+    output: WikiLessonOutput,
+    syllabus: SyllabusModule,
+    force: bool = False,
+) -> VaultExportResult:
+    """Prepare all files separately, then replace them with rollback on errors."""
+    if not output.fact_check_passed:
+        raise ValueError("Não é possível exportar uma aula reprovada na auditoria factual.")
+    paths = _artifact_paths(output, syllabus)
+    vault_root.mkdir(parents=True, exist_ok=True)
+    for relative in paths:
+        _check_safe_target(vault_root, relative)
+
+    staging_dir = Path(tempfile.mkdtemp(prefix=".cathedra-export-", dir=vault_root.parent))
+    keep_staging = False
+    try:
+        staging_root = staging_dir / "vault"
+        snapshots: dict[Path, bytes | None] = {}
+        for relative in paths:
+            target = _check_safe_target(vault_root, relative)
+            snapshot = target.read_bytes() if target.exists() else None
+            snapshots[relative] = snapshot
+            if snapshot is not None:
+                staged = staging_root / relative
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                staged.write_bytes(snapshot)
+                shutil.copystat(target, staged)
+                backup = staging_dir / "backup" / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_bytes(snapshot)
+                shutil.copystat(staged, backup)
+
+        result = _write_lesson_artifacts(staging_root, output, syllabus, force=force)
+        installed: dict[Path, bytes] = {}
+        try:
+            for relative in paths:
+                target = _check_safe_target(vault_root, relative)
+                current = target.read_bytes() if target.exists() else None
+                if current != snapshots[relative]:
+                    raise RuntimeError(f"Vault file changed during export: {target}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                staged = staging_root / relative
+                installed_content = staged.read_bytes()
+                os.replace(staged, target)
+                installed[relative] = installed_content
+        except Exception as exc:
+            rollback_errors: list[str] = []
+            for relative in reversed(installed):
+                target = vault_root / relative
+                try:
+                    target = _check_safe_target(vault_root, relative)
+                    current = target.read_bytes() if target.exists() else None
+                    if current != installed[relative]:
+                        rollback_errors.append(f"{target}: changed after installation")
+                        continue
+                    if snapshots[relative] is None:
+                        target.unlink()
+                    else:
+                        os.replace(staging_dir / "backup" / relative, target)
+                except (OSError, ValueError) as rollback_exc:
+                    rollback_errors.append(f"{target}: {rollback_exc}")
+            if rollback_errors:
+                keep_staging = True
+                raise RuntimeError(
+                    f"Vault rollback failed; backups retained in {staging_dir}: "
+                    + "; ".join(rollback_errors)
+                ) from exc
+            raise
+
+        def destination(staged_path: Path) -> Path:
+            return vault_root / staged_path.relative_to(staging_root)
+
+        return VaultExportResult(
+            lesson_path=destination(result.lesson_path),
+            index_path=destination(result.index_path),
+            zettel_paths=[destination(path) for path in result.zettel_paths],
+            audit_report_path=destination(result.audit_report_path),
+            tension_paths=[destination(path) for path in result.tension_paths],
+            tensions_index_path=(
+                destination(result.tensions_index_path) if result.tensions_index_path else None
+            ),
+        )
+    finally:
+        if not keep_staging:
+            shutil.rmtree(staging_dir)
 
 
 def write_dialectical_tension(
@@ -643,59 +760,28 @@ def write_dialectical_tension(
             "## Anotações Pessoais e Resoluções Práticas\n"
             "<!-- Espaço preservado em reprocessamentos -->\n"
         )
-        tension_path.write_text(content, encoding="utf-8")
+        _write_text_atomically(tension_path, content)
         return tension_path
 
     existing_content = tension_path.read_text(encoding="utf-8")
-
-    z_start = existing_content.find(AUTO_ZETTELS_START)
-    z_end = existing_content.find(AUTO_ZETTELS_END)
-    ev_start = existing_content.find(AUTO_EVIDENCES_START)
-    ev_end = existing_content.find(AUTO_EVIDENCES_END)
-
-    if -1 in (z_start, z_end, ev_start, ev_end):
-        if not force:
-            raise ValueError(f"Delimiters missing or damaged in tension note: {tension_path}")
-        notes_marker = "## Anotações Pessoais e Resoluções Práticas"
-        marker_idx = existing_content.find(notes_marker)
-        preserved_notes = (
-            existing_content[marker_idx:]
-            if marker_idx != -1
-            else f"---\n{notes_marker}\n<!-- Espaço preservado em reprocessamentos -->\n"
-        )
-        z_lines = "\n".join(f"- [[{z}]]" for z in sorted(tension.related_zettel_slugs))
-        z_block = f"\n{z_lines}\n" if z_lines else "\n"
-        ev_block = f"\n{evidence_line}\n"
-        healed_content = (
-            "---\n"
-            'type: "diario_tensao"\n'
-            f'slug: "{escape_yaml_str(tension.slug)}"\n'
-            f'title: "{escape_yaml_str(tension.title)}"\n'
-            f'pole_a: "{escape_yaml_str(tension.pole_a_framework)}"\n'
-            f'pole_b: "{escape_yaml_str(tension.pole_b_framework)}"\n'
-            "tags:\n"
-            "  - mba/tensao\n"
-            "  - mba/dilema-executivo\n"
-            "---\n\n"
-            f"# {tension.title}\n\n"
-            "> [!abstract] Natureza do Trade-off\n"
-            f"> {tension.tension_nature}\n\n"
-            "## Polaridades Dialéticas\n\n"
-            "| Dimensão | Polo A (Tese) | Polo B (Antítese) |\n"
-            "| :--- | :--- | :--- |\n"
-            f"| **Disciplina** | {tension.pole_a_discipline} | {tension.pole_b_discipline} |\n"
-            f"| **Modelo/Framework** | {tension.pole_a_framework} | {tension.pole_b_framework} |\n"
-            f"| **Proposição Central** | {tension.pole_a_thesis} | {tension.pole_b_thesis} |\n\n"
-            "## Diretrizes de Síntese e Arbitragem Gerencial\n"
-            f"{tension.synthesis_guidelines}\n\n"
-            "## Conceitos Atômicos Relacionados\n"
-            f"{AUTO_ZETTELS_START}{z_block}{AUTO_ZETTELS_END}\n\n"
-            "## Aulas e Evidências Concorrentes\n"
-            f"{AUTO_EVIDENCES_START}{ev_block}{AUTO_EVIDENCES_END}\n\n"
-            f"{preserved_notes}"
-        )
-        tension_path.write_text(healed_content, encoding="utf-8")
-        return tension_path
+    z_lines = "\n".join(f"- [[{z}]]" for z in sorted(tension.related_zettel_slugs))
+    existing_content = _ensure_managed_block(
+        existing_content, AUTO_ZETTELS_START, AUTO_ZETTELS_END, tension_path, force, z_lines
+    )
+    existing_content = _ensure_managed_block(
+        existing_content,
+        AUTO_EVIDENCES_START,
+        AUTO_EVIDENCES_END,
+        tension_path,
+        force,
+        evidence_line,
+    )
+    z_start = existing_content.index(AUTO_ZETTELS_START)
+    z_end = existing_content.index(AUTO_ZETTELS_END)
+    ev_start = existing_content.index(AUTO_EVIDENCES_START)
+    ev_end = existing_content.index(AUTO_EVIDENCES_END)
+    if not (z_end < ev_start or ev_end < z_start):
+        raise ValueError(f"Delimiters overlap in {tension_path}")
 
     # 1. Update related zettels block
     z_block_content = existing_content[z_start + len(AUTO_ZETTELS_START) : z_end]
@@ -716,16 +802,22 @@ def write_dialectical_tension(
     new_ev_lines = "\n".join(existing_evidences)
     new_ev_block = f"\n{new_ev_lines}\n" if new_ev_lines else "\n"
 
-    part1 = existing_content[:z_start]
-    part2 = existing_content[z_end + len(AUTO_ZETTELS_END) : ev_start]
-    part3 = existing_content[ev_end + len(AUTO_EVIDENCES_END) :]
-
-    updated_content = (
-        f"{part1}{AUTO_ZETTELS_START}{new_z_block}{AUTO_ZETTELS_END}"
-        f"{part2}{AUTO_EVIDENCES_START}{new_ev_block}{AUTO_EVIDENCES_END}"
-        f"{part3}"
-    )
-    tension_path.write_text(updated_content, encoding="utf-8")
+    updated_content = existing_content
+    replacements = [
+        (
+            z_start,
+            z_end + len(AUTO_ZETTELS_END),
+            f"{AUTO_ZETTELS_START}{new_z_block}{AUTO_ZETTELS_END}",
+        ),
+        (
+            ev_start,
+            ev_end + len(AUTO_EVIDENCES_END),
+            f"{AUTO_EVIDENCES_START}{new_ev_block}{AUTO_EVIDENCES_END}",
+        ),
+    ]
+    for start, end, replacement in sorted(replacements, reverse=True):
+        updated_content = updated_content[:start] + replacement + updated_content[end:]
+    _write_text_atomically(tension_path, updated_content)
     return tension_path
 
 
@@ -779,43 +871,16 @@ def write_tensions_index(
             "## Notas de Síntese Pessoal\n"
             "<!-- Espaço preservado em reprocessamentos -->\n"
         )
-        index_path.write_text(content, encoding="utf-8")
+        _write_text_atomically(index_path, content)
         return index_path
 
     existing_content = index_path.read_text(encoding="utf-8")
-    start_idx = existing_content.find(AUTO_TENSIONS_START)
-    end_idx = existing_content.find(AUTO_TENSIONS_END)
-
-    if start_idx == -1 or end_idx == -1:
-        if not force:
-            raise ValueError(f"Delimiters missing or damaged in tensions index: {index_path}")
-        notes_marker = "## Notas de Síntese Pessoal"
-        marker_idx = existing_content.find(notes_marker)
-        preserved_notes = (
-            existing_content[marker_idx:]
-            if marker_idx != -1
-            else f"---\n{notes_marker}\n<!-- Espaço preservado em reprocessamentos -->\n"
-        )
-        entries = "\n".join(format_entry(t) for t in sorted(tensions, key=lambda x: x.slug))
-        block = f"\n{entries}\n" if entries else "\n"
-        healed_content = (
-            "---\n"
-            'type: "moc_tensoes"\n'
-            'title: "Índice de Tensões Dialéticas e Dilemas Executivos"\n'
-            "tags:\n"
-            "  - mba/indice\n"
-            "  - mba/tensoes\n"
-            "---\n\n"
-            "# Diário de Tensões Dialéticas do MBA\n\n"
-            "> [!quote] Visão Sistêmica\n"
-            "> Mapeamento de trade-offs, polaridades teóricas e conflitos de modelos "
-            "entre disciplinas do MBA.\n\n"
-            "## Matriz de Tensões Mapeadas\n"
-            f"{AUTO_TENSIONS_START}{block}{AUTO_TENSIONS_END}\n\n"
-            f"{preserved_notes}"
-        )
-        index_path.write_text(healed_content, encoding="utf-8")
-        return index_path
+    entries = "\n".join(format_entry(t) for t in sorted(tensions, key=lambda x: x.slug))
+    existing_content = _ensure_managed_block(
+        existing_content, AUTO_TENSIONS_START, AUTO_TENSIONS_END, index_path, force, entries
+    )
+    start_idx = existing_content.index(AUTO_TENSIONS_START)
+    end_idx = existing_content.index(AUTO_TENSIONS_END)
 
     block_content = existing_content[start_idx + len(AUTO_TENSIONS_START) : end_idx]
     existing_lines = [line.strip() for line in block_content.strip().splitlines() if line.strip()]
@@ -838,7 +903,7 @@ def write_tensions_index(
     part1 = existing_content[:start_idx]
     part2 = existing_content[end_idx + len(AUTO_TENSIONS_END) :]
     updated_content = f"{part1}{AUTO_TENSIONS_START}{new_block}{AUTO_TENSIONS_END}{part2}"
-    index_path.write_text(updated_content, encoding="utf-8")
+    _write_text_atomically(index_path, updated_content)
     return index_path
 
 
