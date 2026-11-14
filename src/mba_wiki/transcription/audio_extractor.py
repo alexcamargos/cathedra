@@ -57,6 +57,8 @@ def extract_audio_to_file(video_path: Path | str, output_path: Path | str) -> Pa
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
         )
     except subprocess.CalledProcessError as exc:
