@@ -19,6 +19,7 @@ from mba_wiki.schemas import (
     AuditClaimsResponse,
     ClaimAuditItem,
     DraftResult,
+    LessonAuditReport,
     StructuredSyllabus,
     SyllabusModule,
 )
@@ -374,6 +375,81 @@ def test_build_lesson_full_success(
     assert index_moc.is_file()
     assert zettel_file.is_file()
     assert audit_file.is_file()
+
+
+def test_build_lesson_saves_blocked_audit_without_changing_published_files(
+    tmp_path: Path,
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """A blocked lesson reports the verdict and leaves prior published files intact."""
+    vault = tmp_path / "vault"
+    syllabus_dir = vault / "00_Programa_Curso"
+    syllabus_dir.mkdir(parents=True)
+    module = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Finanças",
+        topics=[],
+        bibliography=[],
+    )
+    (syllabus_dir / "ementa_estruturada.json").write_text(
+        StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
+    )
+    published = vault / "01_Wiki_Disciplinas" / "financas" / "Aula_01_vpl.md"
+    published.parent.mkdir(parents=True)
+    published.write_text("Minha aula anterior", encoding="utf-8")
+    approved_audit = vault / "03_Auditoria_Factual" / "financas_Aula_01_audit.json"
+    approved_audit.parent.mkdir(parents=True)
+    approved_audit.write_text("auditoria anterior", encoding="utf-8")
+    fake_llm_client.add_structured_response(
+        DraftResult(raw_draft="Afirmação falsa.", extracted_zettels=[])
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C1",
+                    quote="Afirmação falsa.",
+                    category="technical",
+                    verdict="false",
+                    severity="S1",
+                )
+            ]
+        )
+    )
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "build-lesson",
+            str(synthetic_cli_pdf),
+            "--discipline",
+            "financas",
+            "--lesson",
+            "1",
+            "--title",
+            "VPL",
+            "--vault",
+            str(vault),
+            "--force",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "auditoria factual" in result.output.lower()
+    assert published.read_text(encoding="utf-8") == "Minha aula anterior"
+    assert approved_audit.read_text(encoding="utf-8") == "auditoria anterior"
+    assert not (vault / "02_Zettelkasten").exists()
+    assert not (vault / "04_Diario_Tensoes").exists()
+    pending = vault / "03_Auditoria_Factual" / "pendentes" / "financas_Aula_01_audit.json"
+    report = LessonAuditReport.model_validate_json(pending.read_text(encoding="utf-8"))
+    assert report.fact_check_passed is False
+    assert report.audit_items[0].claim_id == "C1"
+    assert [call.call_type for call in fake_llm_client.calls] == ["structured", "structured"]
 
 
 def test_get_client_override(fake_llm_client: FakeLLMClient) -> None:
@@ -794,10 +870,10 @@ def test_transcribe_batch_success(
 
     result = cli_runner.invoke(app, ["transcribe-batch", str(videos_dir)])
     assert result.exit_code == 0
-    assert "Lote de transcrição concluído com sucesso" in result.stdout
-    assert "Encontrados: 5" in result.stdout
-    assert "Processados: 4" in result.stdout
-    assert "Ignorados: 1" in result.stdout
+    assert "Lote de Transcricao Concluido com Sucesso" in result.stdout
+    assert "Total de videos encontrados: 5" in result.stdout
+    assert "Videos processados nesta sessao: 4" in result.stdout
+    assert "Videos ignorados (ja existentes): 1" in result.stdout
     mock_run.assert_called_once()
 
 

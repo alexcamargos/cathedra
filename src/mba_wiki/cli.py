@@ -6,13 +6,26 @@ Exposes primary entrypoint commands:
   and humanizing pipeline, exporting markdown wiki pages and zettels to Obsidian.
 """
 
+import contextlib
 import re
+import sys
+import time
+import unicodedata
 from pathlib import Path
 from typing import Annotated
+
+# Force UTF-8 encoding on standard output/error to prevent mojibake in Windows terminals
+if hasattr(sys.stdout, "reconfigure"):
+    with contextlib.suppress(Exception):
+        sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    with contextlib.suppress(Exception):
+        sys.stderr.reconfigure(encoding="utf-8")
 
 import typer
 
 from mba_wiki.agents.graph import (
+    FactCheckBlockedError,
     find_syllabus_module,
     ingestion_node,
     run_lesson_pipeline,
@@ -22,6 +35,7 @@ from mba_wiki.agents.llm_client import StructuredLLMClient, create_llm_client
 from mba_wiki.config import get_settings
 from mba_wiki.exporters.obsidian_writer import (
     export_lesson_to_vault,
+    write_blocked_audit_report,
     write_tensions_index,
 )
 from mba_wiki.ingestion.syllabus_parser import (
@@ -29,7 +43,12 @@ from mba_wiki.ingestion.syllabus_parser import (
     process_and_save_syllabus,
 )
 from mba_wiki.schemas import DialecticalTension
-from mba_wiki.transcription.batch_runner import run_transcription_batch
+from mba_wiki.transcription.batch_runner import (
+    ProgressEvent,
+    migrate_legacy_transcripts,
+    run_transcription_batch,
+)
+from mba_wiki.transcription.telemetry import TranscriptionLogger
 from mba_wiki.transcription.transcriber import LectureTranscriber
 
 app = typer.Typer(
@@ -317,12 +336,6 @@ def build_lesson(
             client=drafter_client,
             auditor_client=auditor_client,
         )
-        if not output.fact_check_passed:
-            typer.secho(
-                "Aviso: A aula possui alertas na auditoria factual (bloqueadores não resolvidos).",
-                fg=typer.colors.YELLOW,
-                err=True,
-            )
         export_result = export_lesson_to_vault(
             vault_root=vault_root,
             output=output,
@@ -341,6 +354,17 @@ def build_lesson(
             typer.echo(f"- Tensões Dialéticas exportadas: {len(export_result.tension_paths)}")
             if export_result.tensions_index_path:
                 typer.echo(f"- Índice de Tensões: {export_result.tensions_index_path}")
+    except FactCheckBlockedError as exc:
+        try:
+            report_path = write_blocked_audit_report(vault_root, exc.state)
+        except OSError as report_error:
+            typer.echo(
+                f"Erro: {exc} Não foi possível salvar a auditoria pendente: {report_error}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from report_error
+        typer.echo(f"Erro: {exc} Relatório pendente: {report_path}", err=True)
+        raise typer.Exit(code=1) from exc
     except Exception as exc:
         typer.echo(f"Erro durante o processamento da aula: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -485,6 +509,40 @@ def sync_tensions(
         raise typer.Exit(code=1) from exc
 
 
+def _sanitize_for_terminal(text: str) -> str:
+    """Normalizes diacritics into plain ASCII equivalents for robust terminal output.
+
+    Prevents Windows console codepage mismatch and PowerShell pipe mojibake
+    when stdout/stderr is captured via Tee-Object or redirection.
+
+    Args:
+        text: Input text containing potential diacritics or special characters.
+
+    Returns:
+        str: ASCII-normalized string.
+    """
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
+def _format_seconds(seconds: float) -> str:
+    """Converts seconds into human-readable HH:MM:SS or MM:SS format.
+
+    Args:
+        seconds: Numeric seconds duration.
+
+    Returns:
+        str: Formatted duration string.
+    """
+    if seconds < 0:
+        return "00s"
+    total_sec = int(round(seconds))
+    hours, remainder = divmod(total_sec, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
 @app.command(name="transcribe-batch")
 def transcribe_batch(
     videos_dir: Annotated[
@@ -549,29 +607,100 @@ def transcribe_batch(
         typer.Exit: Com código 1 em caso de falha crítica na inicialização.
     """
     target_output = output_dir or Path("data/raw/transcripts")
+    target_output.mkdir(parents=True, exist_ok=True)
+
+    # 1. Automatic migration of any legacy transcript folders
+    migrated_count = migrate_legacy_transcripts(target_output, videos_dir=videos_dir)
+    if migrated_count > 0:
+        typer.echo(
+            f"Migradas {migrated_count} transcricoes previas "
+            "para a estrutura canonica de disciplinas."
+        )
+
+    logger = TranscriptionLogger(logs_dir=Path("logs/transcriptions"))
 
     try:
         typer.echo(f"Iniciando transcritor (modelo: {model}, dispositivo: {device or 'auto'})...")
         transcriber = LectureTranscriber(model_size=model, device=device)
 
-        typer.echo(f"Processando vídeos em: {videos_dir}")
-        typer.echo(f"Destino das transcrições: {target_output}")
+        typer.echo(f"Processando videos em: {videos_dir}")
+        typer.echo(f"Destino das transcricoes: {target_output}")
+        typer.echo(f"Arquivo de log em tempo real: {logger.log_path}\n")
+
+        start_wall_time = time.perf_counter()
+
+        def progress_callback(event: ProgressEvent) -> None:
+            now_elapsed = time.perf_counter() - start_wall_time
+            video_name = _sanitize_for_terminal(event.video.video_path.name)
+
+            if event.phase == "skipped":
+                typer.echo(
+                    f"[{event.index:03d}/{event.total:03d}] [SKIP] "
+                    f"{event.video.discipline_slug} | {video_name} (ja transcrito)"
+                )
+            elif event.phase == "start":
+                typer.echo(f"\n[{event.index:03d}/{event.total:03d}] Processando: {video_name}")
+                module_info = (
+                    f" | Modulo: {event.video.module_slug}" if event.video.module_slug else ""
+                )
+                safe_rel = _sanitize_for_terminal(event.video.relative_path)
+                typer.echo(
+                    f"            Origem: {safe_rel} "
+                    f"(Disciplina: {event.video.discipline_slug}{module_info})"
+                )
+            elif event.phase == "extracting":
+                typer.echo("            -> [1/2] Extraindo audio PCM 16kHz via FFmpeg...")
+            elif event.phase == "transcribing":
+                typer.echo(
+                    f"            -> [2/2] FFmpeg OK ({event.extraction_seconds:.1f}s). "
+                    "Transcrevendo com Faster-Whisper..."
+                )
+            elif event.phase == "completed":
+                dur_min = event.duration_seconds / 60
+                typer.echo(
+                    f"            -> Concluido em {_format_seconds(event.transcription_seconds)}! "
+                    f"Audio: {dur_min:.1f} min | Aceleracao: {event.speedup_factor:.1f}x"
+                )
+
+                remaining_files = event.total - event.index
+                avg_time = now_elapsed / event.index if event.index > 0 else 0
+                eta_seconds = avg_time * remaining_files
+                pct = (event.index / event.total) * 100
+                typer.echo(
+                    f"            Progresso Geral: {event.index}/{event.total} ({pct:.1f}%) | "
+                    f"Decorrido: {_format_seconds(now_elapsed)} | "
+                    f"Estimativa restante: {_format_seconds(eta_seconds)}"
+                )
+            elif event.phase == "failed":
+                safe_err = _sanitize_for_terminal(event.error_message or "Erro desconhecido")
+                typer.secho(
+                    f"            -> FALHA no arquivo: {safe_err}",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
 
         summary = run_transcription_batch(
             videos_dir=videos_dir,
             output_dir=target_output,
             transcriber=transcriber,
             force=force,
+            progress_callback=progress_callback,
+            logger=logger,
         )
 
-        typer.echo("\n--- Lote de transcrição concluído com sucesso ---")
-        typer.echo(f"Total de vídeos: Encontrados: {summary.total_videos_found}")
-        typer.echo(f"Processados: {summary.videos_processed}")
-        typer.echo(f"Ignorados: {summary.videos_skipped} (já existentes)")
+        typer.echo("\n--- Lote de Transcricao Concluido com Sucesso ---")
+        typer.echo(f"Total de videos encontrados: {summary.total_videos_found}")
+        typer.echo(f"Videos processados nesta sessao: {summary.videos_processed}")
+        typer.echo(f"Videos ignorados (ja existentes): {summary.videos_skipped}")
         typer.echo(f"Falhas: {len(summary.failed_videos)}")
-        duration_min = summary.total_duration_seconds / 60
-        typer.echo(f"Duração de mídia transcrita: {duration_min:.1f} minutos")
-        typer.echo(f"Tempo de processamento: {summary.elapsed_processing_seconds:.1f} segundos")
+        duration_hours = summary.total_duration_seconds / 3600
+        typer.echo(f"Duracao de midia transcrita: {duration_hours:.2f} horas")
+        typer.echo(
+            f"Tempo total de processamento: {_format_seconds(summary.elapsed_processing_seconds)}"
+        )
+        typer.echo("\nTelemetria e relatorios persistidos:")
+        typer.echo(f"- Log textual: {logger.log_path}")
+        typer.echo(f"- Stream JSONL: {logger.jsonl_path}")
 
         if summary.failed_videos:
             typer.echo("\nVídeos que falharam durante o lote:")
