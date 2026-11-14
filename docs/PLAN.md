@@ -184,3 +184,17 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Integrar `VideoTranscript` no pipeline central: (1) adicionar `transcript` opcional ao `LessonPipelineState` e `ingestion_node`/`run_lesson_pipeline`; (2) atualizar `drafter.py` e `drafter.md` para fundir os tópicos do slide com a fala real do professor; (3) atualizar `fact_checker.py` e `fact_checker.md` para considerar a fala transcrita como lastro factual primário; (4) adicionar opção `--transcript` / `-t` com auto-detecção em `build-lesson` na CLI.
 - **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/agents/graph.py`, `src/mba_wiki/agents/drafter.py`, `src/mba_wiki/agents/prompts/drafter.md`, `src/mba_wiki/agents/fact_checker.py`, `src/mba_wiki/agents/prompts/fact_checker.md`, `src/mba_wiki/cli.py`, `tests/test_graph.py`, `tests/test_drafter.py`, `tests/test_fact_checker.py`, `tests/test_cli.py`.
 - **Criterio de aceite:** Testes unitários comprovando que a presença da transcrição enriquece o rascunho sem alucinações e valida alegações factuais passando em `pytest`, `ruff` e `mypy`.
+
+---
+
+## Etapa 30: Telemetria estruturada, feedback em tempo real e resolucao hierarquica de disciplinas na transcricao
+- **Status:** `[x]`
+- **Escopo:** (1) Implementar `src/mba_wiki/transcription/telemetry.py` para registro detalhado de métricas (tempos de FFmpeg e Faster-Whisper, fatores de aceleração, palavras, bytes e status em JSONL e arquivo de log formatado); (2) Aprimorar `discover_lecture_videos` e normalização ASCII de slugs em `src/mba_wiki/transcription/batch_runner.py` para mapear corretamente a hierarquia Módulo -> Disciplina e suportar callback de progresso em tempo real; (3) Configurar codificação UTF-8 no Windows e feedback visual no comando CLI `transcribe-batch` com progresso [X/Total], detalhes do vídeo, ETA e estatísticas consolidadas; (4) Criar rotina para preservar e migrar transcrições prévias para os novos diretórios normalizados de disciplina.
+- **Arquivos afetados:** `src/mba_wiki/transcription/telemetry.py`, `src/mba_wiki/transcription/batch_runner.py`, `src/mba_wiki/cli.py`, `tests/test_telemetry.py`, `tests/test_batch_runner.py`, `tests/test_cli.py`.
+- **Criterio de aceite:** Testes unitários cobrindo telemetria, eventos de progresso e resolução hierárquica passando com `uv run pytest tests/test_telemetry.py tests/test_batch_runner.py tests/test_cli.py`, `uv run ruff check .` e `uv run mypy src/`.
+
+## Etapa 31: Bloqueio de publicacao diante de pendencias factuais
+- **Status:** `[x]`
+- **Escopo:** Interromper o pipeline antes do humanizador quando houver bloqueadores factuais; registrar a auditoria em area separada de pendentes, preservar publicacoes anteriores e impedir a exportacao direta de resultados reprovados, inclusive com `--force`.
+- **Arquivos afetados:** `src/mba_wiki/agents/graph.py`, `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_graph.py`, `tests/test_cli.py`, `tests/test_exporters.py`, `tests/test_config.py`, `docs/SPEC.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
