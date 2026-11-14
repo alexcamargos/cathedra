@@ -117,6 +117,38 @@ def test_slugify_converts_text_to_valid_slug() -> None:
     assert slugify("  Espaços   Extras  ") == "espacos-extras"
 
 
+def test_pipeline_stops_before_humanizer_when_factual_blocker_remains(
+    sample_syllabus_module: SyllabusModule, fake_llm_client: FakeLLMClient
+) -> None:
+    """A failed factual audit cannot reach humanization or produce an output."""
+    state = create_initial_state(
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="Dados do slide.")],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="VPL",
+        source_slide_filename="aula.pdf",
+    )
+    claim = ClaimAuditItem(
+        claim_id="C1",
+        quote="Afirmação falsa.",
+        category="technical",
+        verdict="false",
+        severity="S1",
+    )
+    fake_llm_client.add_structured_response(
+        DraftResult(raw_draft="Afirmação falsa.", extracted_zettels=[])
+    )
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[claim]))
+
+    with pytest.raises(RuntimeError, match="auditoria factual"):
+        run_lesson_pipeline(state=state, client=fake_llm_client)
+
+    assert state.audit_items == [claim]
+    assert state.output is None
+    assert state.humanized_markdown is None
+    assert [call.call_type for call in fake_llm_client.calls] == ["structured", "structured"]
+
+
 def test_find_syllabus_module_by_slug(sample_syllabus_module: SyllabusModule) -> None:
     """Tests finding a module in a StructuredSyllabus by discipline slug.
 

@@ -336,3 +336,226 @@ def test_agy_cli_client_resilient_json_extraction_with_logs_and_fences(
 
     assert result.topic == "Estrutura de Capital Avançada"
     assert result.score == 9.9
+
+
+def test_agy_cli_client_stream_json_ndjson_parsing(mocker: MockerFixture) -> None:
+    """Tests that large prompts parse stream-json NDJSON result events and isolate cwd.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_run = mocker.patch("subprocess.run")
+    result_event = {
+        "event": "result",
+        "result": {
+            "status": "SUCCESS",
+            "response": json.dumps({"topic": "Redes Neurais", "score": 9.5}),
+        },
+    }
+    ndjson_stdout = (
+        '{"event":"init","conversation_id":"abc"}\n'
+        '{"event":"step_update","step_update":{"step_index":0}}\n'
+        f"{json.dumps(result_event)}\n"
+    )
+    mock_run.return_value = mocker.MagicMock(
+        returncode=0,
+        stdout=ndjson_stdout,
+        stderr="",
+    )
+
+    client = AGYCLIClient()
+    result = client.generate_structured(
+        system_prompt="Sistema",
+        user_prompt="X" * 5000,
+        response_model=SampleOutputModel,
+    )
+
+    assert result.topic == "Redes Neurais"
+    assert result.score == 9.5
+    call_args, call_kwargs = mock_run.call_args
+    cmd = call_args[0]
+    assert "--input-format" in cmd
+    assert "stream-json" in cmd
+    assert "--disable-slash-commands" in cmd
+    assert call_kwargs.get("encoding") == "utf-8"
+    assert "cwd" in call_kwargs
+    parsed_input = json.loads(call_kwargs["input"].strip())
+    assert parsed_input["event"] == "user"
+    assert len(parsed_input["message"]["content"]) > 5000
+
+
+def test_agy_cli_client_stream_json_error_raises(mocker: MockerFixture) -> None:
+    """Tests that stream-json result events with status ERROR raise RuntimeError.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_run = mocker.patch("subprocess.run")
+    ndjson_stdout = (
+        '{"event":"init","conversation_id":"abc"}\n'
+        '{"event":"result","result":{"status":"ERROR","response":"","error":"rate limit"}}\n'
+    )
+    mock_run.return_value = mocker.MagicMock(
+        returncode=0,
+        stdout=ndjson_stdout,
+        stderr="",
+    )
+
+    client = AGYCLIClient()
+    with pytest.raises(RuntimeError, match="AGY CLI stream-json error: rate limit"):
+        client.generate_text(system_prompt="Sys", user_prompt="X" * 5000)
+
+
+def test_gemini_rest_client_parses_thinking_level(mocker: MockerFixture) -> None:
+    """Tests that GeminiRESTClient splits ':thinking_level' and sends thinkingConfig.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    mock_post = mocker.patch("httpx.Client.post")
+    mock_resp = mocker.MagicMock()
+    mock_resp.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": json.dumps({"topic": "T", "score": 9.0})}]}}]
+    }
+    mock_post.return_value = mock_resp
+
+    client = GeminiRESTClient(api_key="test-key", model="gemini-4-hydrogen:medium")
+    result = client.generate_structured(
+        system_prompt="Sys",
+        user_prompt="User",
+        response_model=SampleOutputModel,
+    )
+
+    assert client.model == "gemini-4-hydrogen"
+    assert client.thinking_level == "medium"
+    assert result.topic == "T"
+    call_args, call_kwargs = mock_post.call_args
+    assert "/models/gemini-4-hydrogen:generateContent" in call_args[0]
+    assert call_kwargs["json"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "medium"}
+
+
+def test_gemini_rest_client_retries_on_503_and_succeeds(mocker: MockerFixture) -> None:
+    """Tests that GeminiRESTClient retries on 503 Service Unavailable and succeeds.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    import httpx
+
+    mock_sleep = mocker.patch("time.sleep")
+    req = httpx.Request("POST", "https://example.com")
+    resp_503 = httpx.Response(503, request=req)
+    err_503 = httpx.HTTPStatusError("503", request=req, response=resp_503)
+
+    ok_resp = mocker.MagicMock()
+    ok_resp.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+
+    mock_post = mocker.patch("httpx.Client.post", side_effect=[err_503, ok_resp])
+
+    client = GeminiRESTClient(api_key="test-key", model="gemini-4-hydrogen", max_retries=2)
+    result = client.generate_text(system_prompt="Sys", user_prompt="User")
+
+    assert result == "OK"
+    assert mock_post.call_count == 2
+    mock_sleep.assert_called_once_with(2.0)
+
+
+def test_gemini_rest_client_raises_after_exhausting_retries(mocker: MockerFixture) -> None:
+    """Tests that GeminiRESTClient re-raises HTTPStatusError after max_retries.
+
+    Args:
+        mocker: Pytest mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    import httpx
+
+    mocker.patch("time.sleep")
+    req = httpx.Request("POST", "https://example.com")
+    resp_503 = httpx.Response(503, request=req)
+    err_503 = httpx.HTTPStatusError("503", request=req, response=resp_503)
+
+    mock_post = mocker.patch("httpx.Client.post", side_effect=err_503)
+
+    client = GeminiRESTClient(api_key="test-key", model="gemini-4-hydrogen", max_retries=2)
+    with pytest.raises(httpx.HTTPStatusError):
+        client.generate_text(system_prompt="Sys", user_prompt="User")
+
+    assert mock_post.call_count == 3
+
+
+def test_gemini_rest_client_records_usage_metadata(
+    mocker: MockerFixture,
+    tmp_path: object,
+) -> None:
+    """Tests that GeminiRESTClient appends usageMetadata to usage_log_path.
+
+    Args:
+        mocker: Pytest mock fixture.
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from pathlib import Path
+
+    log_file = Path(str(tmp_path)) / "llm_usage.jsonl"
+    ok_resp = mocker.MagicMock()
+    ok_resp.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 1200,
+            "candidatesTokenCount": 350,
+            "thoughtsTokenCount": 150,
+            "totalTokenCount": 1700,
+        },
+    }
+    mocker.patch("httpx.Client.post", return_value=ok_resp)
+
+    client = GeminiRESTClient(
+        api_key="test-key",
+        model="gemini-4-hydrogen:medium",
+        usage_log_path=log_file,
+    )
+    result = client.generate_text(system_prompt="Sys", user_prompt="User")
+
+    assert result == "OK"
+    assert log_file.is_file()
+    entry = json.loads(log_file.read_text(encoding="utf-8").strip())
+    assert entry["model"] == "gemini-4-hydrogen"
+    assert entry["thinking_level"] == "medium"
+    assert entry["prompt_tokens"] == 1200
+    assert entry["candidates_tokens"] == 350
+    assert entry["thoughts_tokens"] == 150
+    assert entry["total_tokens"] == 1700
