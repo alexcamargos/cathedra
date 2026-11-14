@@ -73,7 +73,7 @@ def format_fact_checker_user_prompt(
     bib_list = "\n".join(f"- {b}" for b in syllabus.bibliography)
     topics_list = "\n".join(f"- {t}" for t in syllabus.topics)
     syllabus_sec = (
-        f"## Fonte 1: Ementa e Bibliografia Oficial da Disciplina\n"
+        f"## Fonte 1: Ementa estruturada e lista bibliográfica não consultada\n"
         f"Disciplina: {syllabus.discipline_name} (slug: `{syllabus.discipline_slug}`)\n\n"
         f"### Resumo da Ementa\n{syllabus.syllabus_summary}\n\n"
         f"### Tópicos Curriculares\n{topics_list}\n\n"
@@ -96,15 +96,17 @@ def format_fact_checker_user_prompt(
     if transcript:
         duration_min = transcript.duration_seconds / 60
         transcript_parts: list[str] = [
-            f"## Fonte 3: Transcrição Literal da Fala do Professor na Videoaula\n"
+            f"## Fonte 3: Transcrição da Fala do Professor na Videoaula\n"
             f"Duração gravada: {duration_min:.1f} minutos | "
             f"Arquivo de origem: `{transcript.source_filename}`\n\n"
-            f"Esta transcrição contém o registro fiel da exposição oral do professor em aula. "
-            f"Alegações, dados, exemplos de mercado e explicações presentes na fala abaixo "
-            f"possuem respaldo empírico e devem ser julgadas como verificadas ('verified'), "
-            f"não devendo ser classificadas como sem suporte ('S4'):\n\n"
             f"{transcript.full_text_cleaned}"
         ]
+        for segment in transcript.segments:
+            transcript_parts.append(
+                f"### Segmento {segment.id} ({segment.start:.1f}s–{segment.end:.1f}s)\n"
+                f"Transcrição bruta: {segment.text_raw}\n"
+                f"Transcrição limpa: {segment.text_cleaned}"
+            )
         sections.append("\n\n".join(transcript_parts))
 
     # 4. Draft Text to Audit
@@ -136,6 +138,47 @@ def format_fact_checker_user_prompt(
         sections.append("\n\n".join(tension_parts))
 
     return "\n\n".join(sections)
+
+
+def locate_evidence_source(
+    item: ClaimAuditItem,
+    slides: list[SlideChunk],
+    syllabus: SyllabusModule,
+    transcript: VideoTranscript | None,
+) -> str | None:
+    """Return a canonical location only if the excerpt occurs in supplied material."""
+    quote = item.evidence_quote
+    if not quote or not quote.strip():
+        return None
+
+    def contains(text: str) -> bool:
+        return " ".join(quote.split()).casefold() in " ".join(text.split()).casefold()
+
+    if item.evidence_kind == "slide" and item.evidence_locator is not None:
+        matching_slides = [slide for slide in slides if slide.slide_number == item.evidence_locator]
+        if len(matching_slides) == 1:
+            slide = matching_slides[0]
+            if contains(slide.raw_text) or any(contains(eq) for eq in slide.latex_equations):
+                return f"Slide {slide.slide_number}"
+    elif item.evidence_kind == "syllabus" and item.evidence_locator is None:
+        if contains(syllabus.syllabus_summary) or any(contains(topic) for topic in syllabus.topics):
+            return "Ementa estruturada"
+    elif item.evidence_kind == "transcript" and transcript is not None:
+        if transcript.segments and item.evidence_locator is not None:
+            matching_segments = [
+                segment for segment in transcript.segments if segment.id == item.evidence_locator
+            ]
+            if len(matching_segments) == 1:
+                segment = matching_segments[0]
+                if contains(segment.text_raw) or contains(segment.text_cleaned):
+                    return (
+                        f"Transcrição {transcript.source_filename}, segmento {segment.id} "
+                        f"({segment.start:.1f}s–{segment.end:.1f}s)"
+                    )
+        elif not transcript.segments and item.evidence_locator is None:
+            if contains(transcript.full_text_raw) or contains(transcript.full_text_cleaned):
+                return f"Transcrição {transcript.source_filename}, sem timestamps"
+    return None
 
 
 def normalize_claim_punctuation(text: str) -> str:
@@ -454,6 +497,17 @@ def audit_lesson_draft(
         response_model=AuditClaimsResponse,
     )
 
+    evidence_blockers = False
+    for item in response.claims:
+        item.evidence_status = "pending_review"
+        if item.verdict == "verified":
+            source = locate_evidence_source(item, slides, syllabus, transcript)
+            item.evidence_source = source
+            if source is None:
+                evidence_blockers = True
+            else:
+                item.evidence_status = "material_supported"
+
     # 1. Segregate claims matching raw_draft vs secondary artifacts
     draft_claims: list[ClaimAuditItem] = []
     has_orphan_blockers = False
@@ -515,7 +569,11 @@ def audit_lesson_draft(
 
     total_removed = removed_count_draft + removed_count_zettels + removed_count_tensions
     overall_passed = (
-        draft_passed and not zettels_blockers and not tensions_blockers and not has_orphan_blockers
+        draft_passed
+        and not zettels_blockers
+        and not tensions_blockers
+        and not has_orphan_blockers
+        and not evidence_blockers
     )
 
     return FactCheckResult(

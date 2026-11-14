@@ -70,6 +70,10 @@ class ClaimAuditItem(BaseModel):
         evidence_source: Slide citation or external source validating the claim.
         proposed_fix: Suggested correction for false or imprecise statements.
         audit_stage: Pipeline stage that produced the verdict.
+        evidence_kind: Type of supplied course material containing the excerpt.
+        evidence_locator: Slide number or transcript segment identifier.
+        evidence_quote: Literal excerpt of the supplied material.
+        evidence_status: Whether the excerpt was located in supplied material.
     """
 
     claim_id: str
@@ -80,6 +84,10 @@ class ClaimAuditItem(BaseModel):
     evidence_source: str | None = None
     proposed_fix: str | None = None
     audit_stage: Literal["draft", "final"] = "draft"
+    evidence_kind: Literal["slide", "transcript", "syllabus"] | None = None
+    evidence_locator: int | None = None
+    evidence_quote: str | None = None
+    evidence_status: Literal["material_supported", "pending_review"] = "pending_review"
 
 
 class AuditClaimsResponse(BaseModel):
