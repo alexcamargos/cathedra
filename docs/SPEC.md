@@ -27,6 +27,7 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Classifica desvios de S1 a S6: corrige imprecisoes e erros factuais (S1/S2) e remove afirmacoes sem lastro verificavel (S4), contabilizando `removed_unsupported_claims`.
    - Audita o corpo da aula, os Zettels atomicos candidatos e as tensoes dialeticas identificadas, expurgando zettels e tensoes contaminados por declaracoes falsas (`S1`) ou sem lastro (`S4`).
    - Bloqueia o avanco do pipeline (`has_unresolved_blockers = True`) caso correcoes essenciais nao tenham sido aplicadas com sucesso no texto.
+   - Em caso de bloqueio, interrompe antes do Humanizer e grava o relatorio em `03_Auditoria_Factual/pendentes/`, sem alterar a aula publicada nem sua auditoria aprovada.
    - Registra desvios conceituais/logicos (S3/S5) e imprecisoes menores (S6) em `ClaimAuditItem`.
    - Define `fact_check_passed = True` se todas as afirmacoes forem verificadas ou devidamente corrigidas/removidas sem violacoes graves pendentes.
 4. **Linter Estilistico (`humanizer_node`):**

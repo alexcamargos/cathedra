@@ -104,6 +104,9 @@ Opcoes disponiveis:
 - `--title`: Titulo descritivo da aula (caso nao venha do primeiro slide).
 - `--force`: Forca sobrescrita de delimitadores estruturais e reprocessamento.
 
+Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e publicada.
+O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
+
 ### 4. Sincronizar Diario de Tensoes
 
 Reindexa todas as notas de tensoes dialeticas registradas no cofre e atualiza o indice geral:
