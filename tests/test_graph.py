@@ -190,6 +190,9 @@ def test_pipeline_blocks_claim_introduced_by_humanizer(
         category="metric",
         verdict="verified",
         evidence_source="Slide 1",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="A taxa é 10%.",
     )
     bad_claim = ClaimAuditItem(
         claim_id="C1",
@@ -244,6 +247,9 @@ def test_pipeline_records_initial_and_final_audits(
                         quote="A taxa é 10%.",
                         category="metric",
                         verdict="verified",
+                        evidence_kind="slide",
+                        evidence_locator=1,
+                        evidence_quote="A taxa é 10%.",
                     )
                 ]
             ),
@@ -254,6 +260,9 @@ def test_pipeline_records_initial_and_final_audits(
                         quote="A taxa usada é 10%.",
                         category="metric",
                         verdict="verified",
+                        evidence_kind="slide",
+                        evidence_locator=1,
+                        evidence_quote="A taxa é 10%.",
                     )
                 ]
             ),
@@ -441,6 +450,9 @@ def test_run_lesson_pipeline_end_to_end_success(
                 verdict="verified",
                 severity=None,
                 evidence_source="Slide 1",
+                evidence_kind="slide",
+                evidence_locator=1,
+                evidence_quote="O VPL desconta fluxos futuros à taxa de oportunidade.",
             )
         ]
     )

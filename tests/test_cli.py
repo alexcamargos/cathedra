@@ -61,7 +61,8 @@ def synthetic_cli_pdf(tmp_path: Path) -> Path:
     page.insert_text(
         (50, 60),
         "# Critérios de Decisão de Investimento\n"
-        "O método do VPL analisa os fluxos descontados à taxa de oportunidade.",
+        "O método do VPL analisa os fluxos descontados à taxa de oportunidade.\n"
+        "O VPL desconta fluxos futuros.",
         fontsize=16,
     )
     doc.save(str(pdf_path))
@@ -328,6 +329,9 @@ def test_build_lesson_full_success(
                 verdict="verified",
                 severity=None,
                 evidence_source="Slide 1",
+                evidence_kind="slide",
+                evidence_locator=1,
+                evidence_quote="O VPL desconta fluxos futuros.",
             )
         ]
     )
@@ -513,6 +517,65 @@ def test_build_lesson_saves_final_audit_blocker(
     assert not report.fact_check_passed
     assert report.audit_items[0].audit_stage == "final"
     assert report.audit_items[0].quote == "A taxa é 20%."
+
+
+def test_build_lesson_rejects_verified_claim_without_located_evidence(
+    tmp_path: Path,
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """An ungrounded verified verdict stays pending and cannot publish a lesson."""
+    vault = tmp_path / "vault"
+    syllabus_dir = vault / "00_Programa_Curso"
+    syllabus_dir.mkdir(parents=True)
+    module = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Finanças",
+        topics=[],
+        bibliography=["Livro de Finanças"],
+    )
+    (syllabus_dir / "ementa_estruturada.json").write_text(
+        StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
+    )
+    fake_llm_client.add_structured_response(DraftResult(raw_draft="A taxa é 20%."))
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C1",
+                    quote="A taxa é 20%.",
+                    category="metric",
+                    verdict="verified",
+                    evidence_source="Livro de Finanças",
+                )
+            ]
+        )
+    )
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "build-lesson",
+            str(synthetic_cli_pdf),
+            "--discipline",
+            "financas",
+            "--lesson",
+            "1",
+            "--vault",
+            str(vault),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not (vault / "01_Wiki_Disciplinas").exists()
+    pending = vault / "03_Auditoria_Factual" / "pendentes" / "financas_Aula_01_audit.json"
+    report = LessonAuditReport.model_validate_json(pending.read_text(encoding="utf-8"))
+    assert report.audit_items[0].evidence_status == "pending_review"
+    assert report.audit_items[0].evidence_source is None
 
 
 def test_get_client_override(fake_llm_client: FakeLLMClient) -> None:
