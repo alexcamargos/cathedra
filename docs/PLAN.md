@@ -198,3 +198,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Interromper o pipeline antes do humanizador quando houver bloqueadores factuais; registrar a auditoria em area separada de pendentes, preservar publicacoes anteriores e impedir a exportacao direta de resultados reprovados, inclusive com `--force`.
 - **Arquivos afetados:** `src/mba_wiki/agents/graph.py`, `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_graph.py`, `tests/test_cli.py`, `tests/test_exporters.py`, `tests/test_config.py`, `docs/SPEC.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 32: Auditoria factual apos o humanizador
+- **Status:** `[x]`
+- **Escopo:** Auditar novamente o corpo e os Zettels finais e as tensoes antes da publicacao, registrar os vereditos das duas etapas e bloquear a publicacao diante de qualquer desvio apontado ou falha do auditor final.
+- **Arquivos afetados:** `src/mba_wiki/agents/graph.py`, `src/mba_wiki/schemas.py`, `tests/test_graph.py`, `tests/test_cli.py`, `docs/SPEC.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
