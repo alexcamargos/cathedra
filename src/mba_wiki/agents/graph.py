@@ -24,6 +24,14 @@ from mba_wiki.schemas import (
 )
 
 
+class FactCheckBlockedError(RuntimeError):
+    """A factual audit failed; retain the audited state for reporting."""
+
+    def __init__(self, state: LessonPipelineState) -> None:
+        super().__init__("A auditoria factual possui bloqueadores não resolvidos.")
+        self.state = state
+
+
 def slugify(text: str) -> str:
     """Normalizes string to lowercase ASCII slug format, replacing punctuation with hyphens.
 
@@ -233,6 +241,8 @@ def execute_pipeline(
 
     # 2. Auditoria Factual Adversarial
     state = fact_check_node(state=state, client=auditor_client or client)
+    if not state.fact_check_passed:
+        raise FactCheckBlockedError(state)
 
     # 3. Polimento Estilístico com Validação e Retentativa
     state = humanize_node(state=state, client=client, max_attempts=humanizer_max_attempts)
