@@ -7,12 +7,14 @@ link duplication across re-runs.
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from mba_wiki.schemas import (
     AtomicZettel,
     DialecticalTension,
     LessonAuditReport,
+    LessonPipelineState,
     SyllabusModule,
     WikiLessonOutput,
 )
@@ -497,6 +499,28 @@ def write_atomic_zettel(
     return zettel_path
 
 
+def write_blocked_audit_report(vault_root: Path, state: LessonPipelineState) -> Path:
+    """Persist a blocked audit separately without replacing a published audit."""
+    if state.fact_check_passed:
+        raise ValueError("A auditoria factual aprovada não é uma auditoria pendente.")
+    report = LessonAuditReport(
+        discipline_slug=state.discipline_slug,
+        discipline_name=state.discipline_name,
+        lesson_number=state.lesson_number,
+        lesson_title=state.lesson_title,
+        processed_date=date.today(),
+        fact_check_passed=False,
+        total_claims_audited=len(state.audit_items),
+        removed_unsupported_claims=state.removed_unsupported_claims,
+        audit_items=state.audit_items,
+    )
+    directory = vault_root / "03_Auditoria_Factual" / "pendentes"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{state.discipline_slug}_Aula_{state.lesson_number:02d}_audit.json"
+    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
 def write_audit_report(
     vault_root: Path,
     output: WikiLessonOutput,
@@ -558,6 +582,9 @@ def export_lesson_to_vault(
         ValueError: If file delimiters are damaged or missing during updates and force=False.
         OSError: If filesystem operations fail.
     """
+    if not output.fact_check_passed:
+        raise ValueError("Não é possível exportar uma aula reprovada na auditoria factual.")
+
     lesson_path = write_lesson_page(vault_root=vault_root, output=output, force=force)
     index_path = write_discipline_index(
         vault_root=vault_root, syllabus=syllabus, output=output, force=force

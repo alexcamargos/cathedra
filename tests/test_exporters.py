@@ -107,6 +107,18 @@ def sample_lesson_output() -> WikiLessonOutput:
     )
 
 
+def test_export_rejects_failed_audit_before_any_write(
+    tmp_path: Path, sample_syllabus: SyllabusModule, sample_lesson_output: WikiLessonOutput
+) -> None:
+    """The exporter independently rejects unapproved lessons before mutating the vault."""
+    sample_lesson_output.fact_check_passed = False
+
+    with pytest.raises(ValueError, match="auditoria factual"):
+        export_lesson_to_vault(tmp_path, sample_lesson_output, sample_syllabus, force=True)
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_write_discipline_index_creates_new_file(
     tmp_path: Path,
     sample_syllabus: SyllabusModule,
