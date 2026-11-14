@@ -69,6 +69,7 @@ class ClaimAuditItem(BaseModel):
         severity: Severity code (S1 to S6) if an issue is detected.
         evidence_source: Slide citation or external source validating the claim.
         proposed_fix: Suggested correction for false or imprecise statements.
+        audit_stage: Pipeline stage that produced the verdict.
     """
 
     claim_id: str
@@ -78,6 +79,7 @@ class ClaimAuditItem(BaseModel):
     severity: Literal["S1", "S2", "S3", "S4", "S5", "S6"] | None = None
     evidence_source: str | None = None
     proposed_fix: str | None = None
+    audit_stage: Literal["draft", "final"] = "draft"
 
 
 class AuditClaimsResponse(BaseModel):

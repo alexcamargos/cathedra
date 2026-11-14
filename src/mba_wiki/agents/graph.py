@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 
 from mba_wiki.agents.drafter import draft_node
-from mba_wiki.agents.fact_checker import fact_check_node
+from mba_wiki.agents.fact_checker import audit_lesson_draft, fact_check_node
 from mba_wiki.agents.humanizer import humanize_node
 from mba_wiki.agents.llm_client import StructuredLLMClient
 from mba_wiki.ingestion.slide_parser import infer_slide_title, parse_slides
@@ -241,13 +241,36 @@ def execute_pipeline(
 
     # 2. Auditoria Factual Adversarial
     state = fact_check_node(state=state, client=auditor_client or client)
+    state.audit_items = [
+        item.model_copy(update={"audit_stage": "draft"}) for item in state.audit_items
+    ]
     if not state.fact_check_passed:
         raise FactCheckBlockedError(state)
 
     # 3. Polimento Estilístico com Validação e Retentativa
     state = humanize_node(state=state, client=client, max_attempts=humanizer_max_attempts)
 
-    # 4. Finalização e Construção do Contrato de Saída
+    # 4. Audit the exact post-humanizer artifacts, without mutating them.
+    state.fact_check_passed = False
+    final_audit = audit_lesson_draft(
+        draft_text=state.humanized_markdown or "",
+        slides=state.slides,
+        syllabus=state.syllabus,
+        client=auditor_client or client,
+        zettels=[zettel.model_copy(deep=True) for zettel in state.extracted_zettels],
+        tensions=[tension.model_copy(deep=True) for tension in state.detected_tensions],
+        transcript=state.transcript,
+    )
+    state.audit_items.extend(
+        item.model_copy(update={"audit_stage": "final"}) for item in final_audit.audit_items
+    )
+    if not final_audit.fact_check_passed or any(
+        item.verdict != "verified" or item.severity is not None for item in final_audit.audit_items
+    ):
+        raise FactCheckBlockedError(state)
+    state.fact_check_passed = True
+
+    # 5. Finalização e Construção do Contrato de Saída
     state = finalize_output_node(state=state, processed_date=processed_date)
 
     return state
