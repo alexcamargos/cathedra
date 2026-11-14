@@ -106,6 +106,8 @@ Opcoes disponiveis:
 
 Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e publicada.
 O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
+Apos a reescrita, uma segunda chamada ao auditor verifica o texto e os Zettels finais;
+qualquer desvio apontado nessa etapa tambem interrompe a publicacao para revisao.
 
 ### 4. Sincronizar Diario de Tensoes
 

@@ -35,6 +35,7 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Reescreve a prosa (`body_markdown` e `content_markdown`) seguindo as diretrizes do `docs/LINTER_RULES.md`, protegendo cercas e blocos legitimos de codigo Markdown.
    - Executa validacao deterministica via codigo (`validators.py`).
    - Se houver violacoes, realimenta os erros a LLM em ate 3 tentativas de autocorrecao; se persistirem erros apos a 3ª tentativa, lanca `ValidationError` interrompendo o pipeline para evitar gravacao corrompida no Vault.
+   - Apos a reescrita, executa nova auditoria sobre o corpo final, Zettels e tensoes. Qualquer desvio factual apontado nessa verificacao bloqueia a publicacao e gera relatorio pendente, mesmo se houver correcao sugerida; os vereditos registram a etapa `draft` ou `final`.
 5. **Persistencia na Wiki e Recuperacao no Obsidian (`persistence_node`):**
    - Grava a pagina da aula na pasta da respectiva disciplina no Obsidian, preservando notas manuais do usuario fora dos delimitadores de conteudo.
    - Atualiza o arquivo `_Indice_Materia.md` (MOC da disciplina) de forma idempotente sem duplicatas.
@@ -75,6 +76,7 @@ class ClaimAuditItem(BaseModel):
     severity: Literal["S1", "S2", "S3", "S4", "S5", "S6"] | None = None
     evidence_source: str | None = None
     proposed_fix: str | None = None
+    audit_stage: Literal["draft", "final"] = "draft"
 
 
 class AtomicZettel(BaseModel):
