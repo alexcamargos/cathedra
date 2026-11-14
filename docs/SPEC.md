@@ -43,6 +43,8 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Grava as notas atomicas novas ou atualizadas na pasta `02_Zettelkasten/`.
    - Grava ou atualiza notas de tensao dialetica em `04_Diario_Tensoes/<tension_slug>.md` e consolida o `_Indice_Tensoes.md`.
    - Na pagina de aula, `--force` recupera delimitadores ausentes sem descartar texto existente; marcadores duplicados ou invertidos bloqueiam a gravacao. O frontmatter existente e preservado e pode conter metadados anteriores ao reprocessamento.
+   - Indices, Zettels e tensoes preservam as anotacoes existentes e rejeitam delimitadores ambiguos; `--force` adiciona blocos ausentes sem apagar o texto anterior.
+   - O exportador prepara todos os artefatos fora do cofre e, em caso de erro na substituicao, tenta restaurar os arquivos ja modificados. Alteracoes concorrentes detectadas nao sao sobrescritas na restauracao; se ela nao puder ser concluida, as copias de seguranca sao preservadas e seu caminho e informado. Interrupcoes abruptas e modificacoes concorrentes nao podem ser tratadas como uma transacao atomica multipla.
 
 ## 3. Contratos de dados (Schemas Pydantic v2)
 

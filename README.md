@@ -109,6 +109,11 @@ bloco automatico; o frontmatter pode continuar com metadados da criacao. Se falt
 `--force` preserva o texto anterior e acrescenta um novo bloco, que pode exigir revisao manual.
 Marcadores duplicados ou invertidos exigem correcao manual.
 
+O processamento de uma aula prepara os arquivos antes de grava-los no cofre e tenta restaurar as
+versoes anteriores se uma substituicao falhar. Se uma restauracao nao for segura, o comando informa
+onde foram mantidas as copias. A operacao nao garante atomicidade entre arquivos em caso de queda
+abrupta do processo ou do computador; evite editar os mesmos arquivos durante a exportacao.
+
 Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e publicada.
 O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
 Apos a reescrita, uma segunda chamada ao auditor verifica o texto e os Zettels finais;
