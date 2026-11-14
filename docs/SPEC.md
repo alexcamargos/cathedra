@@ -23,13 +23,14 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Analisa tensoes dialeticas e trade-offs interdisciplinares entre a materia atual e outras disciplinas da ementa (`DialecticalTension` e `CrossDisciplineLink`).
 3. **Auditoria Factual Adversarial (`fact_check_node`):**
    - Extrai todas as afirmacoes objetivas (datas, formulas, autores, premissas, metricas) do rascunho expandido.
-   - Confronta cada afirmacao contra o conteudo literal dos slides, a transcricao de fala do professor e a bibliografia da ementa.
+   - Confronta as afirmacoes identificadas contra o conteudo fornecido dos slides, a ementa estruturada e a transcricao automatica, quando presente. A lista bibliografica nao constitui acesso ao conteudo das obras.
+   - Um veredito `verified` indica apenas suporte declarado no material fornecido. Exige tipo de fonte, trecho literal e localizacao; o codigo confirma a presenca do trecho e bloqueia a publicacao se ele nao for localizado. Isso nao comprova que o trecho sustenta semanticamente a afirmacao ou que esteja correto.
    - Classifica desvios de S1 a S6: corrige imprecisoes e erros factuais (S1/S2) e remove afirmacoes sem lastro verificavel (S4), contabilizando `removed_unsupported_claims`.
    - Audita o corpo da aula, os Zettels atomicos candidatos e as tensoes dialeticas identificadas, expurgando zettels e tensoes contaminados por declaracoes falsas (`S1`) ou sem lastro (`S4`).
    - Bloqueia o avanco do pipeline (`has_unresolved_blockers = True`) caso correcoes essenciais nao tenham sido aplicadas com sucesso no texto.
    - Em caso de bloqueio, interrompe antes do Humanizer e grava o relatorio em `03_Auditoria_Factual/pendentes/`, sem alterar a aula publicada nem sua auditoria aprovada.
    - Registra desvios conceituais/logicos (S3/S5) e imprecisoes menores (S6) em `ClaimAuditItem`.
-   - Define `fact_check_passed = True` se todas as afirmacoes forem verificadas ou devidamente corrigidas/removidas sem violacoes graves pendentes.
+   - Define `fact_check_passed = True` se as afirmacoes identificadas forem suportadas ou devidamente corrigidas/removidas sem violacoes graves pendentes; a extracao e a avaliacao semantica feitas pela LLM nao garantem cobertura integral.
 4. **Linter Estilistico (`humanizer_node`):**
    - Aplica pre-sanitizacao deterministica em Python para Zettels atomicos, eliminando retentativas excessivas e chamadas repetidas N+1 a LLM.
    - Reescreve a prosa (`body_markdown` e `content_markdown`) seguindo as diretrizes do `docs/LINTER_RULES.md`, protegendo cercas e blocos legitimos de codigo Markdown.
@@ -77,6 +78,10 @@ class ClaimAuditItem(BaseModel):
     evidence_source: str | None = None
     proposed_fix: str | None = None
     audit_stage: Literal["draft", "final"] = "draft"
+    evidence_kind: Literal["slide", "transcript", "syllabus"] | None = None
+    evidence_locator: int | None = None
+    evidence_quote: str | None = None
+    evidence_status: Literal["material_supported", "pending_review"] = "pending_review"
 
 
 class AtomicZettel(BaseModel):

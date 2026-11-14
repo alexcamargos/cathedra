@@ -108,6 +108,9 @@ Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e pub
 O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
 Apos a reescrita, uma segunda chamada ao auditor verifica o texto e os Zettels finais;
 qualquer desvio apontado nessa etapa tambem interrompe a publicacao para revisao.
+O veredito `verified` indica apoio identificado no material de aula fornecido, nao verificacao
+independente. A bibliografia listada nao e consultada automaticamente. O programa confere a
+localizacao literal do trecho citado, mas nao garante sua pertinencia ou a correcao da fonte.
 
 ### 4. Sincronizar Diario de Tensoes
 
