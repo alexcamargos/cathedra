@@ -25,4 +25,6 @@ data/processed/
 
 # Scratch & volatile files
 scratch/
+logs/
+*.log
 .env
