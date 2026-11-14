@@ -43,7 +43,9 @@ tags:
 ## 2. Pagina de Aula na Wiki (`Aula_<NN>_<slug_tema>.md`)
 Localizacao: `01_Wiki_Disciplinas/<discipline_slug>/Aula_<NN>_<lesson_slug>.md`
 
-O corpo da aula (`body_markdown`), os conceitos atomicos vinculados, conexoes interdisciplinares e tensoes dialeticas ficam protegidos entre marcadores automaticos. O bloco final de notas manuais nunca e sobrescrito caso o arquivo ja exista no disco.
+O corpo da aula (`body_markdown`), os conceitos atomicos vinculados, conexoes interdisciplinares e tensoes dialeticas ficam protegidos entre marcadores automaticos. Ao reprocessar, todo o texto fora desses marcadores e preservado, inclusive frontmatter, cabecalho e notas pessoais. Por isso, campos do frontmatter representam os valores da criacao da pagina e nao sao atualizados automaticamente; os dados atuais da auditoria constam no JSON correspondente.
+
+Com `--force`, se um ou ambos os marcadores estiverem ausentes, o texto existente e preservado, eventuais marcadores isolados sao removidos e um novo bloco automatico e acrescentado ao final. O conteudo antigo pode permanecer visivel para revisao. Marcadores duplicados ou em ordem invertida impedem a gravacao, inclusive com `--force`.
 
 ```markdown
 ---

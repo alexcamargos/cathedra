@@ -210,3 +210,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Distinguir suporte no material de verificacao independente, exigir localizacao e trecho literal para vereditos `verified`, bloquear vereditos sem evidencia localizada e registrar referencias de slides e segmentos de transcricao. Bibliografia listada nao conta como obra consultada.
 - **Arquivos afetados:** `src/mba_wiki/agents/fact_checker.py`, `src/mba_wiki/agents/prompts/fact_checker.md`, `src/mba_wiki/schemas.py`, `tests/test_fact_checker.py`, `tests/test_graph.py`, `tests/test_cli.py`, `docs/SPEC.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 34: Preservacao de anotacoes nas paginas de aula
+- **Status:** `[x]`
+- **Escopo:** Preservar todo o conteudo externo ao bloco automatico da aula, recuperar marcadores ausentes sem descartar texto existente e rejeitar marcadores duplicados ou invertidos mesmo com `--force`.
+- **Arquivos afetados:** `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_exporters.py`, `tests/test_cli.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
