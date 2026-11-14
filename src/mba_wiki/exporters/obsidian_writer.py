@@ -201,8 +201,8 @@ def write_lesson_page(
 ) -> Path:
     """Writes or idempotently updates a lesson wiki page (Aula_NN_slug.md).
 
-    Replaces content strictly within AUTO-CONTENT delimiters, ensuring personal
-    notes in subsequent sections remain fully preserved.
+    Replaces content strictly within AUTO-CONTENT delimiters. On forced recovery,
+    preserves the existing text and appends a new generated block.
 
     Args:
         vault_root: Target Obsidian Vault root directory.
@@ -213,7 +213,7 @@ def write_lesson_page(
         Path to the saved or updated lesson Markdown file.
 
     Raises:
-        ValueError: If delimiters are missing in an existing lesson file and force=False.
+        ValueError: If delimiters are ambiguous, or missing without force.
     """
     discipline_dir = vault_root / "01_Wiki_Disciplinas" / output.discipline_slug
     discipline_dir.mkdir(parents=True, exist_ok=True)
@@ -257,80 +257,29 @@ def write_lesson_page(
         return lesson_path
 
     existing_content = lesson_path.read_text(encoding="utf-8")
+    start_count = existing_content.count(AUTO_CONTENT_START)
+    end_count = existing_content.count(AUTO_CONTENT_END)
     start_idx = existing_content.find(AUTO_CONTENT_START)
     end_idx = existing_content.find(AUTO_CONTENT_END)
 
-    if start_idx == -1 or end_idx == -1:
+    if start_count > 1 or end_count > 1 or (start_count == end_count == 1 and start_idx > end_idx):
+        raise ValueError(f"Delimiters are duplicated or out of order in {lesson_path}")
+
+    if start_count == 0 or end_count == 0:
         if not force:
             raise ValueError(
                 f"Delimiters '{AUTO_CONTENT_START}' and '{AUTO_CONTENT_END}' "
                 f"not found in {lesson_path}"
             )
-        notes_marker = "## Notas Pessoais de Aula"
-        marker_idx = existing_content.find(notes_marker)
-        if marker_idx != -1:
-            preserved_manual = existing_content[marker_idx:]
-        else:
-            preserved_manual = f"{notes_marker}\n<!-- Espaco preservado em reprocessamentos -->\n"
-
-        new_header = (
-            "---\n"
-            "type: wiki_aula\n"
-            f'discipline_slug: "{escape_yaml_str(output.discipline_slug)}"\n'
-            f'discipline_name: "{escape_yaml_str(output.discipline_name)}"\n'
-            f"lesson_number: {output.lesson_number}\n"
-            f'lesson_title: "{escape_yaml_str(output.lesson_title)}"\n'
-            f'lesson_slug: "{escape_yaml_str(output.lesson_slug)}"\n'
-            f"processed_date: {output.processed_date.isoformat()}\n"
-            f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
-            f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
-            f"removed_claims: {output.removed_unsupported_claims}\n"
-            "tags:\n"
-            "  - mba/aula\n"
-            f"  - mba/{output.discipline_slug}\n"
-            "---\n\n"
-            f"# Aula {output.lesson_number:02d}: {output.lesson_title}\n\n"
-            "> [!info] Contexto da Disciplina\n"
-            f"> Parte de [[01_Wiki_Disciplinas/{output.discipline_slug}/_Indice_Materia|"
-            f"{output.discipline_name}]] | Slide base: `{output.source_slide_filename}`\n\n"
-            f"{AUTO_CONTENT_START}\n"
-            f"{auto_body}\n"
-            f"{AUTO_CONTENT_END}\n\n"
-            "---\n"
-        )
-        updated_content = f"{new_header}{preserved_manual}"
+        preserved = existing_content.replace(AUTO_CONTENT_START, "", 1)
+        preserved = preserved.replace(AUTO_CONTENT_END, "", 1)
+        updated_content = f"{preserved}\n\n{AUTO_CONTENT_START}\n{auto_body}\n{AUTO_CONTENT_END}\n"
         lesson_path.write_text(updated_content, encoding="utf-8")
         return lesson_path
 
-    after_block = existing_content[end_idx + len(AUTO_CONTENT_END) :]
-
-    # Update frontmatter metadata while preserving manual trailing notes
-    new_header = (
-        "---\n"
-        "type: wiki_aula\n"
-        f'discipline_slug: "{escape_yaml_str(output.discipline_slug)}"\n'
-        f'discipline_name: "{escape_yaml_str(output.discipline_name)}"\n'
-        f"lesson_number: {output.lesson_number}\n"
-        f'lesson_title: "{escape_yaml_str(output.lesson_title)}"\n'
-        f'lesson_slug: "{escape_yaml_str(output.lesson_slug)}"\n'
-        f"processed_date: {output.processed_date.isoformat()}\n"
-        f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
-        f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
-        f"removed_claims: {output.removed_unsupported_claims}\n"
-        "tags:\n"
-        "  - mba/aula\n"
-        f"  - mba/{output.discipline_slug}\n"
-        "---\n\n"
-        f"# Aula {output.lesson_number:02d}: {output.lesson_title}\n\n"
-        "> [!info] Contexto da Disciplina\n"
-        f"> Parte de [[01_Wiki_Disciplinas/{output.discipline_slug}/_Indice_Materia|"
-        f"{output.discipline_name}]] | Slide base: `{output.source_slide_filename}`\n\n"
-        f"{AUTO_CONTENT_START}\n"
-        f"{auto_body}\n"
-        f"{AUTO_CONTENT_END}"
-    )
-
-    updated_content = f"{new_header}{after_block}"
+    before_block = existing_content[: start_idx + len(AUTO_CONTENT_START)]
+    after_block = existing_content[end_idx:]
+    updated_content = f"{before_block}\n{auto_body}\n{after_block}"
     lesson_path.write_text(updated_content, encoding="utf-8")
     return lesson_path
 

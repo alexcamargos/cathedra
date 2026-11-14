@@ -285,8 +285,91 @@ def test_write_lesson_page_creates_and_preserves_personal_notes(
     reprocessed_content = reprocessed_path.read_text(encoding="utf-8")
 
     assert "# Texto Atualizado e Expandido" in reprocessed_content
-    assert "removed_claims: 2" in reprocessed_content
+    # Frontmatter is outside the managed block and must remain untouched.
+    assert "removed_claims: 0" in reprocessed_content
     assert "Anotação pessoal do aluno feita em sala." in reprocessed_content
+
+
+def test_lesson_update_preserves_everything_outside_generated_block(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """User metadata and notes before and after the generated block are untouched."""
+    path = write_lesson_page(tmp_path, sample_lesson_output)
+    original = path.read_text(encoding="utf-8")
+    original = original.replace("tags:\n", "custom: valor pessoal\ntags:\n  - minha/tag\n")
+    original = original.replace(
+        "<!-- AUTO-CONTENT:START -->", "Observação antes.\n\n<!-- AUTO-CONTENT:START -->"
+    )
+    original += "\nAnotação depois.\n"
+    path.write_text(original, encoding="utf-8")
+    before, tail = original.split("<!-- AUTO-CONTENT:START -->")
+    _, after = tail.split("<!-- AUTO-CONTENT:END -->")
+
+    output = sample_lesson_output.model_copy(update={"body_markdown": "Novo corpo."})
+    write_lesson_page(tmp_path, output)
+
+    updated = path.read_text(encoding="utf-8")
+    updated_before, updated_tail = updated.split("<!-- AUTO-CONTENT:START -->")
+    block, updated_after = updated_tail.split("<!-- AUTO-CONTENT:END -->")
+    assert updated_before == before
+    assert updated_after == after
+    assert "Novo corpo." in block
+
+
+@pytest.mark.parametrize(
+    "surviving_marker", ["", "<!-- AUTO-CONTENT:START -->", "<!-- AUTO-CONTENT:END -->"]
+)
+def test_lesson_force_recovery_preserves_all_text_and_is_idempotent(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+    surviving_marker: str,
+) -> None:
+    """A damaged file retains its existing text and gains a separate generated block."""
+    path = write_lesson_page(tmp_path, sample_lesson_output)
+    original = (
+        f"# Aula\n\nNota antes.\n{surviving_marker}\nTrecho antigo ou manual.\n\nNota final.\n"
+    )
+    path.write_text(original, encoding="utf-8")
+
+    write_lesson_page(tmp_path, sample_lesson_output, force=True)
+    healed = path.read_text(encoding="utf-8")
+    assert (
+        original.replace(surviving_marker, "", 1) in healed
+        if surviving_marker
+        else original in healed
+    )
+    assert healed.count("<!-- AUTO-CONTENT:START -->") == 1
+    assert healed.count("<!-- AUTO-CONTENT:END -->") == 1
+    assert sample_lesson_output.body_markdown.strip() in healed
+
+    write_lesson_page(tmp_path, sample_lesson_output, force=True)
+    assert path.read_text(encoding="utf-8") == healed
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize(
+    "markers",
+    [
+        "<!-- AUTO-CONTENT:END -->\n<!-- AUTO-CONTENT:START -->",
+        "<!-- AUTO-CONTENT:START -->\n<!-- AUTO-CONTENT:START -->\n<!-- AUTO-CONTENT:END -->",
+        "<!-- AUTO-CONTENT:START -->\n<!-- AUTO-CONTENT:END -->\n<!-- AUTO-CONTENT:END -->",
+    ],
+)
+def test_lesson_rejects_ambiguous_markers_without_changing_file(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+    markers: str,
+    force: bool,
+) -> None:
+    """Ambiguous delimiter layouts must not risk deleting or duplicating notes."""
+    path = write_lesson_page(tmp_path, sample_lesson_output)
+    original = f"Cabeçalho pessoal.\n{markers}\nNotas pessoais.\n"
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="[Dd]elimit"):
+        write_lesson_page(tmp_path, sample_lesson_output, force=force)
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_write_atomic_zettel_creates_and_updates_idempotently(
