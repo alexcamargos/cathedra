@@ -45,6 +45,20 @@ class TranscriptSegment(BaseModel):
     text_cleaned: str = Field(..., description="Texto saneado sem marcadores discursivos vazios")
 
 
+class TranscriptCheckpoint(BaseModel):
+    source_relative_path: str
+    source_size_bytes: int
+    source_sha256: str
+    model_name: str
+    device: str
+    compute_type: str
+    language: str
+    vad_filter: bool
+    beam_size: int
+    engine_version: str
+    pipeline_revision: str
+
+
 class VideoTranscript(BaseModel):
     """Artefato consolidado de transcrição de uma videoaula."""
 
@@ -58,6 +72,7 @@ class VideoTranscript(BaseModel):
     full_text_raw: str
     full_text_cleaned: str
     segments: list[TranscriptSegment] = Field(default_factory=list)
+    checkpoint: TranscriptCheckpoint | None = None
 ```
 
 O campo `lesson_number` e opcional para compatibilidade com transcricoes existentes. O lote nao o infere automaticamente do nome do video. Para vincular uma transcricao sem esse campo, informe seu JSON explicitamente em `build-lesson --transcript`; a escolha explicita declara a associacao com a aula. A busca automatica somente usa transcricoes com disciplina e numero da aula preenchidos e correspondentes.
@@ -101,5 +116,11 @@ O campo `lesson_number` e opcional para compatibilidade com transcricoes existen
 
 ### 4.5. Pipeline em Lote com Checkpoint (`batch_runner.py`)
 - Varre a pasta raiz informada, detectando subpastas por disciplina.
-- Estratégia *checkpoint/resume*: se `Aula_XX.json` já existir e for válido no destino, pula o arquivo sem reprocessamento.
+- Antes de iniciar o transcritor, rejeita o lote quando dois videos apontam para o mesmo destino, inclusive com `--force`.
+- Reutiliza um JSON apenas se o checkpoint registrar caminho relativo, tamanho e SHA-256 do video e os parametros efetivos correspondentes: nome do modelo, dispositivo, precisao, idioma, VAD, beam size, versao do faster-whisper e revisao do pipeline.
+- Videos ou configuracoes alterados sao reprocessados, e o JSON anterior e preservado em `.history/<disciplina>/`; o caminho da copia e informado no progresso e na telemetria. O nome do modelo e a versao da biblioteca nao comprovam que os pesos remotos ou arquivos locais do modelo permaneceram identicos.
+- JSONs antigos sem checkpoint ou invalidos sao relatados como nao verificados e preservados. `--force` autoriza reprocessa-los com copia anterior; um JSON que identifique outro video, disciplina ou caminho de origem e tratado como colisao, mesmo com `--force`.
+- Revalida o hash do video apos a transcricao e verifica se o JSON foi alterado antes de substitui-lo. Sem um bloqueio entre processos, nao ha garantia absoluta contra edicoes concorrentes no intervalo final de gravacao.
+- O lote nao migra automaticamente JSONs antigos. A funcao de migracao separada rejeita lotes com colisoes antes de mover arquivos.
+- A revisao do pipeline deve ser incrementada quando mudarem os parametros de extracao, inferencia ou limpeza que influenciam o resultado.
 - Registra logs detalhados de tempo decorrido, taxa de aceleração em relação ao tempo real e consumo de VRAM.

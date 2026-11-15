@@ -234,3 +234,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Proteger a chave Gemini com `SecretStr`, envia-la no cabecalho de autenticacao em vez da URL e evitar sua exposicao nas mensagens de erro, rastreamentos, logs de uso e respostas do modelo.
 - **Arquivos afetados:** `src/mba_wiki/config.py`, `src/mba_wiki/agents/llm_client.py`, `tests/test_config.py`, `tests/test_llm_client.py`, `tests/test_agy_client.py`, `tests/test_secret_safety.py`, `docs/INTEGRATIONS.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 38: Identidade e preservacao dos checkpoints de transcricao
+- **Status:** `[x]`
+- **Escopo:** Identificar videos por caminho e SHA-256 e registrar configuracao efetiva; reutilizar apenas checkpoints correspondentes, detectar colisoes previamente e preservar JSONs anteriores ao reprocessar. Transcricoes antigas sem identidade sao sinalizadas como nao verificadas.
+- **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/transcription/batch_runner.py`, `src/mba_wiki/transcription/transcriber.py`, `src/mba_wiki/transcription/telemetry.py`, `src/mba_wiki/cli.py`, `tests/test_batch_runner.py`, `tests/test_transcription_checkpoints.py`, `tests/test_cli.py`, `docs/SPEC.md`, `docs/TRANSCRIPTION_SPEC.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
