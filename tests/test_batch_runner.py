@@ -4,14 +4,16 @@ Validates recursive directory traversal, checkpoint/resume logic, atomic artifac
 persistence, hierarchical discipline extraction, and progress telemetry across batch runs.
 """
 
+import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 
 from pytest_mock import MockerFixture
 
-from mba_wiki.schemas import TranscriptSegment, VideoTranscript
+from mba_wiki.schemas import TranscriptCheckpoint, TranscriptSegment, VideoTranscript
 from mba_wiki.transcription.batch_runner import (
     ProgressEvent,
     discover_lecture_videos,
@@ -19,6 +21,12 @@ from mba_wiki.transcription.batch_runner import (
     run_transcription_batch,
 )
 from mba_wiki.transcription.telemetry import TranscriptionLogger
+from mba_wiki.transcription.transcriber import (
+    TRANSCRIPTION_BEAM_SIZE,
+    TRANSCRIPTION_LANGUAGE,
+    TRANSCRIPTION_PIPELINE_REVISION,
+    TRANSCRIPTION_VAD_FILTER,
+)
 
 
 def test_discover_lecture_videos_hierarchical(tmp_path: Path) -> None:
@@ -99,6 +107,19 @@ def test_run_transcription_batch_checkpoint_and_resume(
         processed_at=datetime.now(UTC),
         full_text_raw="Texto anterior.",
         full_text_cleaned="Texto anterior.",
+        checkpoint=TranscriptCheckpoint(
+            source_relative_path="marketing/Aula_01.mp4",
+            source_size_bytes=video1.stat().st_size,
+            source_sha256=hashlib.sha256(video1.read_bytes()).hexdigest(),
+            model_name="large-v3",
+            device="cuda",
+            compute_type="int8_float16",
+            language=TRANSCRIPTION_LANGUAGE,
+            vad_filter=TRANSCRIPTION_VAD_FILTER,
+            beam_size=TRANSCRIPTION_BEAM_SIZE,
+            engine_version=version("faster-whisper"),
+            pipeline_revision=TRANSCRIPTION_PIPELINE_REVISION,
+        ),
         segments=[
             TranscriptSegment(
                 id=1,
@@ -252,10 +273,14 @@ def test_run_transcription_batch_failure_tolerance(tmp_path: Path, mocker: Mocke
         side_effect=RuntimeError("FFmpeg erro fatal"),
     )
 
+    mock_transcriber = mocker.MagicMock()
+    mock_transcriber.model_size = "large-v3"
+    mock_transcriber.device = "cpu"
+    mock_transcriber.compute_type = "int8"
     summary = run_transcription_batch(
         videos_dir=videos_dir,
         output_dir=tmp_path / "output",
-        transcriber=mocker.MagicMock(),
+        transcriber=mock_transcriber,
     )
 
     assert summary.total_videos_found == 1
