@@ -228,3 +228,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Validar a transcricao explicita, sua disciplina e numero de aula quando informado; selecionar automaticamente apenas JSONs identificados e sem ambiguidade; registrar origem e metodo nos relatorios aprovados ou pendentes, mantendo compatibilidade por escolha explicita de transcricoes antigas.
 - **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/agents/graph.py`, `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_transcript_binding.py`, `docs/SPEC.md`, `docs/TRANSCRIPTION_SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 37: Protecao de credenciais e mensagens de erro
+- **Status:** `[x]`
+- **Escopo:** Proteger a chave Gemini com `SecretStr`, envia-la no cabecalho de autenticacao em vez da URL e evitar sua exposicao nas mensagens de erro, rastreamentos, logs de uso e respostas do modelo.
+- **Arquivos afetados:** `src/mba_wiki/config.py`, `src/mba_wiki/agents/llm_client.py`, `tests/test_config.py`, `tests/test_llm_client.py`, `tests/test_agy_client.py`, `tests/test_secret_safety.py`, `docs/INTEGRATIONS.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
