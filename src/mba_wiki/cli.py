@@ -45,8 +45,9 @@ from mba_wiki.ingestion.syllabus_parser import (
 from mba_wiki.schemas import DialecticalTension, VideoTranscript
 from mba_wiki.transcription.batch_runner import (
     ProgressEvent,
-    migrate_legacy_transcripts,
+    discover_lecture_videos,
     run_transcription_batch,
+    validate_destination_collisions,
 )
 from mba_wiki.transcription.telemetry import TranscriptionLogger
 from mba_wiki.transcription.transcriber import LectureTranscriber
@@ -622,7 +623,7 @@ def transcribe_batch(
         typer.Option(
             "--force",
             "-f",
-            help="Força reprocessamento de vídeos que já possuem transcrição válida.",
+            help="Reprocessa transcrições existentes, preservando uma cópia anterior.",
         ),
     ] = False,
 ) -> None:
@@ -642,15 +643,12 @@ def transcribe_batch(
         typer.Exit: Com código 1 em caso de falha crítica na inicialização.
     """
     target_output = output_dir or Path("data/raw/transcripts")
+    try:
+        validate_destination_collisions(discover_lecture_videos(videos_dir))
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Erro ao verificar vídeos: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     target_output.mkdir(parents=True, exist_ok=True)
-
-    # 1. Automatic migration of any legacy transcript folders
-    migrated_count = migrate_legacy_transcripts(target_output, videos_dir=videos_dir)
-    if migrated_count > 0:
-        typer.echo(
-            f"Migradas {migrated_count} transcricoes previas "
-            "para a estrutura canonica de disciplinas."
-        )
 
     logger = TranscriptionLogger(logs_dir=Path("logs/transcriptions"))
 
@@ -671,7 +669,14 @@ def transcribe_batch(
             if event.phase == "skipped":
                 typer.echo(
                     f"[{event.index:03d}/{event.total:03d}] [SKIP] "
-                    f"{event.video.discipline_slug} | {video_name} (ja transcrito)"
+                    f"{event.video.discipline_slug} | {video_name} (checkpoint verificado)"
+                )
+            elif event.phase == "unverified":
+                typer.secho(
+                    f"[{event.index:03d}/{event.total:03d}] [NAO VERIFICADO] "
+                    f"{video_name}: {_sanitize_for_terminal(event.error_message or '')}",
+                    fg=typer.colors.YELLOW,
+                    err=True,
                 )
             elif event.phase == "start":
                 typer.echo(f"\n[{event.index:03d}/{event.total:03d}] Processando: {video_name}")
@@ -696,6 +701,9 @@ def transcribe_batch(
                     f"            -> Concluido em {_format_seconds(event.transcription_seconds)}! "
                     f"Audio: {dur_min:.1f} min | Aceleracao: {event.speedup_factor:.1f}x"
                 )
+                if event.backup_path is not None:
+                    backup_display = _sanitize_for_terminal(str(event.backup_path))
+                    typer.echo(f"            Copia anterior: {backup_display}")
 
                 remaining_files = event.total - event.index
                 avg_time = now_elapsed / event.index if event.index > 0 else 0
@@ -723,10 +731,14 @@ def transcribe_batch(
             logger=logger,
         )
 
-        typer.echo("\n--- Lote de Transcricao Concluido com Sucesso ---")
+        if summary.failed_videos or summary.videos_unverified:
+            typer.echo("\n--- Lote de Transcricao Concluido com Pendencias ---")
+        else:
+            typer.echo("\n--- Lote de Transcricao Concluido com Sucesso ---")
         typer.echo(f"Total de videos encontrados: {summary.total_videos_found}")
         typer.echo(f"Videos processados nesta sessao: {summary.videos_processed}")
         typer.echo(f"Videos ignorados (ja existentes): {summary.videos_skipped}")
+        typer.echo(f"Transcricoes anteriores nao verificadas: {summary.videos_unverified}")
         typer.echo(f"Falhas: {len(summary.failed_videos)}")
         duration_hours = summary.total_duration_seconds / 3600
         typer.echo(f"Duracao de midia transcrita: {duration_hours:.2f} horas")
@@ -742,6 +754,11 @@ def transcribe_batch(
             for name, err in summary.failed_videos:
                 typer.echo(f"- {name}: {err}", err=True)
 
+        if summary.failed_videos or summary.videos_unverified:
+            raise typer.Exit(code=1)
+
+    except typer.Exit:
+        raise
     except Exception as exc:
         typer.echo(f"Erro fatal na execução do lote de transcrição: {exc}", err=True)
         raise typer.Exit(code=1) from exc
