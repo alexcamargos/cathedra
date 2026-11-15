@@ -127,6 +127,20 @@ class TranscriptSegment(BaseModel):
         return self
 
 
+class TranscriptCheckpoint(BaseModel):
+    source_relative_path: str
+    source_size_bytes: int
+    source_sha256: str
+    model_name: str
+    device: str
+    compute_type: str
+    language: str
+    vad_filter: bool
+    beam_size: int
+    engine_version: str
+    pipeline_revision: str
+
+
 class VideoTranscript(BaseModel):
     source_filename: str
     discipline_slug: str
@@ -138,6 +152,7 @@ class VideoTranscript(BaseModel):
     full_text_raw: str
     full_text_cleaned: str
     segments: list[TranscriptSegment] = Field(default_factory=list)
+    checkpoint: TranscriptCheckpoint | None = None
 
 
 class WikiLessonOutput(BaseModel):

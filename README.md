@@ -91,8 +91,11 @@ Processa videos em MP4 organizados por pastas de disciplinas, gerando JSONs estr
 uv run mba-wiki transcribe-batch caminho/para/videos/ --model large-v3
 ```
 
-- Pula automaticamente videos ja transcritos com sucesso (*checkpoint/resume*).
-- Aceita a flag `--force` para reprocessamento integral.
+- Pula um video apenas quando o checkpoint confere com o hash do arquivo e a configuracao de transcricao.
+- Se o video ou a configuracao mudar, reprocessa e guarda o JSON anterior em `.history/<disciplina>/`.
+- JSONs antigos ou invalidos ficam como nao verificados; `--force` autoriza reprocessa-los preservando uma copia. Colisoes de destino interrompem o lote, mesmo com `--force`.
+- A leitura do video para calcular o SHA-256 tem custo de I/O. O nome do modelo e a versao da biblioteca nao identificam alteracoes nos pesos sob o mesmo nome; evite executar lotes concorrentes sobre os mesmos destinos.
+- A migracao automatica de JSONs antigos foi desativada para preservar os arquivos existentes.
 
 ### 3. Processar Aula e Gerar Wiki
 
