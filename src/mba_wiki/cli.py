@@ -42,7 +42,7 @@ from mba_wiki.ingestion.syllabus_parser import (
     load_structured_syllabus,
     process_and_save_syllabus,
 )
-from mba_wiki.schemas import DialecticalTension
+from mba_wiki.schemas import DialecticalTension, VideoTranscript
 from mba_wiki.transcription.batch_runner import (
     ProgressEvent,
     migrate_legacy_transcripts,
@@ -166,6 +166,41 @@ def init_syllabus(
         raise typer.Exit(code=1) from exc
 
 
+def find_auto_transcript(
+    discipline: str, lesson_number: int, transcripts_root: Path
+) -> tuple[Path | None, bool]:
+    """Select only a unique transcript with explicit discipline and lesson metadata."""
+    if not discipline or any(c in discipline for c in "/\\:") or discipline in {".", ".."}:
+        raise ValueError("Slug de disciplina inválido para localizar transcrições.")
+    candidates: list[Path] = []
+    unidentified = False
+    seen: set[Path] = set()
+    for folder in (transcripts_root / discipline, transcripts_root / "geral"):
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.glob("*.json")):
+            resolved = path.resolve()
+            if resolved in seen or not path.is_file():
+                continue
+            seen.add(resolved)
+            try:
+                transcript = VideoTranscript.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                unidentified = True
+                continue
+            if transcript.discipline_slug != discipline:
+                continue
+            if transcript.lesson_number is None:
+                unidentified = True
+            elif transcript.lesson_number == lesson_number:
+                candidates.append(resolved)
+    if len(candidates) > 1 or (candidates and unidentified):
+        raise ValueError(
+            "Transcrições ambíguas ou sem identificação suficiente; escolha uma com --transcript."
+        )
+    return (candidates[0] if candidates else None), unidentified
+
+
 @app.command(name="build-lesson")
 def build_lesson(
     slide_path: Annotated[
@@ -234,7 +269,7 @@ def build_lesson(
         Path | None,
         typer.Option(
             "--transcript",
-            "-t",
+            "-T",
             help="Caminho explícito para a transcrição da aula em formato JSON.",
             dir_okay=False,
             resolve_path=True,
@@ -303,18 +338,15 @@ def build_lesson(
     try:
         resolved_slug = slug or (slugify(title) if title else None)
 
-        # Resolução de transcrição de fala (explícita ou auto-detecção em data/raw/transcripts)
         resolved_transcript_path: Path | None = transcript
         if resolved_transcript_path is None:
-            candidate_paths = [
-                Path("data/raw/transcripts") / discipline / f"{slide_path.stem}.json",
-                Path("data/raw/transcripts") / "geral" / f"{slide_path.stem}.json",
-                Path("data/raw/transcripts") / discipline / f"Aula_{lesson:02d}.json",
-            ]
-            for candidate in candidate_paths:
-                if candidate.is_file():
-                    resolved_transcript_path = candidate.resolve()
-                    break
+            resolved_transcript_path, unidentified = find_auto_transcript(
+                discipline, lesson, Path("data/raw/transcripts")
+            )
+            if resolved_transcript_path is None:
+                typer.echo("Nenhuma transcrição identificada automaticamente para esta aula.")
+                if unidentified:
+                    typer.echo("Há transcrições sem identificação suficiente; use --transcript.")
 
         if resolved_transcript_path and resolved_transcript_path.is_file():
             typer.echo(f"Transcrição de fala vinculada: {resolved_transcript_path.name}")
@@ -327,6 +359,9 @@ def build_lesson(
             lesson_slug=resolved_slug,
             full_syllabus=structured_syllabus,
             transcript_path=resolved_transcript_path,
+            require_transcript_lesson_number=(
+                transcript is None and resolved_transcript_path is not None
+            ),
         )
 
         drafter_client = get_client(auditor=False)

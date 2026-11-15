@@ -451,6 +451,9 @@ def write_blocked_audit_report(vault_root: Path, state: LessonPipelineState) -> 
         total_claims_audited=len(state.audit_items),
         removed_unsupported_claims=state.removed_unsupported_claims,
         audit_items=state.audit_items,
+        source_transcript_filename=state.transcript.source_filename if state.transcript else None,
+        source_transcript_path=state.source_transcript_path,
+        source_transcript_binding=state.source_transcript_binding,
     )
     directory = vault_root / "03_Auditoria_Factual" / "pendentes"
     directory.mkdir(parents=True, exist_ok=True)
@@ -490,6 +493,9 @@ def write_audit_report(
         total_claims_audited=len(output.audit_items),
         removed_unsupported_claims=output.removed_unsupported_claims,
         audit_items=output.audit_items,
+        source_transcript_filename=output.source_transcript_filename,
+        source_transcript_path=output.source_transcript_path,
+        source_transcript_binding=output.source_transcript_binding,
     )
 
     _write_text_atomically(report_path, report.model_dump_json(indent=2))
