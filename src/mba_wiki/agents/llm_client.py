@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -131,7 +131,7 @@ class GeminiRESTClient:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | SecretStr,
         model: str = "gemini-2.5-pro",
         timeout: float = 300.0,
         max_retries: int = 4,
@@ -154,9 +154,12 @@ class GeminiRESTClient:
         Raises:
             ValueError: If api_key is empty.
         """
-        if not api_key:
+        secret = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        if not secret.get_secret_value():
             raise ValueError("Gemini API key must not be empty.")
-        self.api_key: str = api_key
+        if secret.get_secret_value() in model:
+            raise ValueError("Gemini model identifier contains sensitive data.")
+        self.api_key: SecretStr = secret
         base_model, thinking_level = self._parse_model_spec(model)
         self.model: str = base_model
         self.thinking_level: str | None = thinking_level
@@ -176,12 +179,16 @@ class GeminiRESTClient:
             Parsed JSON response dictionary.
 
         Raises:
-            httpx.HTTPError: If all retry attempts fail or a non-retryable error occurs.
+            RuntimeError: If all retry attempts fail or a non-retryable error occurs.
         """
         for attempt in range(self.max_retries + 1):
             try:
                 with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(url, json=payload)
+                    resp = client.post(
+                        url,
+                        json=payload,
+                        headers={"x-goog-api-key": self.api_key.get_secret_value()},
+                    )
                     resp.raise_for_status()
                     result: dict[str, Any] = resp.json()
                     self._record_usage(result)
@@ -189,10 +196,17 @@ class GeminiRESTClient:
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 if status not in self._RETRYABLE_STATUS_CODES or attempt >= self.max_retries:
-                    raise
-            except (httpx.TimeoutException, httpx.TransportError):
+                    raise RuntimeError(f"Gemini request failed with HTTP {status}.") from None
+            except httpx.TimeoutException:
                 if attempt >= self.max_retries:
-                    raise
+                    raise RuntimeError("Gemini request timed out.") from None
+            except httpx.TransportError:
+                if attempt >= self.max_retries:
+                    raise RuntimeError("Gemini request failed due to a network error.") from None
+            except httpx.HTTPError:
+                raise RuntimeError("Gemini request failed.") from None
+            except json.JSONDecodeError:
+                raise ValueError("Gemini returned an invalid JSON response.") from None
             time.sleep(self.base_delay * (2**attempt))
 
         raise RuntimeError("Unreachable retry loop exit")
@@ -214,15 +228,18 @@ class GeminiRESTClient:
         usage = response_data.get("usageMetadata")
         if not isinstance(usage, dict):
             return
-        entry = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "model": self.model,
-            "thinking_level": self.thinking_level,
-            "prompt_tokens": int(usage.get("promptTokenCount", 0)),
-            "candidates_tokens": int(usage.get("candidatesTokenCount", 0)),
-            "thoughts_tokens": int(usage.get("thoughtsTokenCount", 0)),
-            "total_tokens": int(usage.get("totalTokenCount", 0)),
-        }
+        try:
+            entry = {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "model": self.model,
+                "thinking_level": self.thinking_level,
+                "prompt_tokens": int(usage.get("promptTokenCount", 0)),
+                "candidates_tokens": int(usage.get("candidatesTokenCount", 0)),
+                "thoughts_tokens": int(usage.get("thoughtsTokenCount", 0)),
+                "total_tokens": int(usage.get("totalTokenCount", 0)),
+            }
+        except (TypeError, ValueError, OverflowError):
+            return
         try:
             self.usage_log_path.parent.mkdir(parents=True, exist_ok=True)
             with self.usage_log_path.open("a", encoding="utf-8") as f:
@@ -321,12 +338,11 @@ class GeminiRESTClient:
             Validated instance of response_model.
 
         Raises:
-            httpx.HTTPError: If API request fails.
-            pydantic.ValidationError: If response parsing fails.
+            RuntimeError: If API request fails.
+            ValueError: If response parsing fails.
         """
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model}:generateContent?key={self.api_key}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         )
         schema = self._inline_json_schema(response_model.model_json_schema())
         payload = {
@@ -344,12 +360,17 @@ class GeminiRESTClient:
 
         candidates = data.get("candidates", [])
         if not candidates:
-            raise ValueError(f"No candidates returned by Gemini: {data}")
+            raise ValueError("No candidates returned by Gemini.")
 
         parts = candidates[0].get("content", {}).get("parts") or [{}]
         raw_json = parts[0].get("text", "{}")
+        if self.api_key.get_secret_value() in raw_json:
+            raise ValueError("Gemini response contained sensitive data.")
         clean_json = extract_json_payload(raw_json)
-        return response_model.model_validate_json(clean_json)
+        try:
+            return response_model.model_validate_json(clean_json)
+        except ValidationError:
+            raise ValueError("Gemini returned an invalid structured response.") from None
 
     def generate_text(
         self,
@@ -368,11 +389,10 @@ class GeminiRESTClient:
             Generated text string.
 
         Raises:
-            httpx.HTTPError: If API request fails.
+            RuntimeError: If API request fails.
         """
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model}:generateContent?key={self.api_key}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         )
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
@@ -385,10 +405,13 @@ class GeminiRESTClient:
 
         candidates = data.get("candidates", [])
         if not candidates:
-            raise ValueError(f"No candidates returned by Gemini: {data}")
+            raise ValueError("No candidates returned by Gemini.")
 
         parts = candidates[0].get("content", {}).get("parts") or [{}]
-        return str(parts[0].get("text", ""))
+        text = str(parts[0].get("text", ""))
+        if self.api_key.get_secret_value() in text:
+            raise ValueError("Gemini response contained sensitive data.")
+        return text
 
 
 class AGYCLIClient:
@@ -610,7 +633,7 @@ class AGYCLIClient:
 
 
 def create_llm_client(
-    api_key: str | None = None,
+    api_key: str | SecretStr | None = None,
     model: str | None = None,
     backend: str | None = None,
 ) -> StructuredLLMClient:
@@ -636,7 +659,7 @@ def create_llm_client(
 
     if selected_backend == "gemini":
         key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not key:
+        if not key or (isinstance(key, SecretStr) and not key.get_secret_value()):
             raise ValueError(
                 "Gemini API key is required. Set GEMINI_API_KEY in environment or .env file."
             )

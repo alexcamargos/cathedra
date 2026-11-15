@@ -6,7 +6,7 @@ Loads environment variables, vault paths, and API keys using pydantic-settings.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
         default="gemini-2.5-pro",
         description="Model identifier for factual auditing.",
     )
-    gemini_api_key: str | None = Field(
+    gemini_api_key: SecretStr | None = Field(
         default=None,
         description="Secret API key for Google Gemini access.",
     )
