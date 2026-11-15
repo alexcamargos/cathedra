@@ -33,7 +33,12 @@ A implementacao de producao (`AGYCLIClient`) utiliza a CLI nativa em subprocesso
 - **Roteamento de Modelos Especializados:** Suporte aos modelos configurados em `config.py` (`llm_model` para geracao geral e `llm_model_auditor` para auditoria factual adversarial mais profunda).
 - **Extracao Resiliente de JSON:** Mecanismo de captura por envelope delimitador `{...}` para filtrar possiveis mensagens preliminares ou logs de diagnostico emitidos pela ferramenta CLI.
 
-## 3. Infraestrutura de Transcricao e Aceleracao CUDA
+## 3. Cliente Gemini REST e credenciais
+O cliente Gemini carrega `GEMINI_API_KEY` a partir da configuracao ou do ambiente. A chave e mantida como `SecretStr` e enviada no cabecalho `x-goog-api-key`, sem fazer parte da URL. Erros de rede e de resposta nao incluem o corpo retornado nem o detalhe bruto da excecao; erros HTTP preservam o codigo de status. Metadados de uso invalidos sao ignorados.
+
+`SecretStr` reduz a exposicao em representacoes e serializacao, mas nao substitui a protecao do arquivo `.env`, do ambiente ou do processo. Uma credencial exposta precisa ser revogada ou rotacionada no provedor.
+
+## 4. Infraestrutura de Transcricao e Aceleracao CUDA
 O modulo de transcricao desacoplada (`src/mba_wiki/transcription/`) integra dependencias de baixo nivel para execucao eficiente no Windows:
 - **Auto-provisao de FFmpeg:** Localizacao automatica ou download e extracao de executavel estatico minimalista para `%LOCALAPPDATA%\cathedra\bin` sem necessidade de instalacao manual prévia.
 - **Injecao Dinamica de DLLs NVIDIA:** Localizacao e registro dinamico dos pacotes `nvidia-cublas-cu12` e `nvidia-cudnn-cu12` via `os.add_dll_directory()` no Windows antes da inicializacao do backend CTranslate2 / Faster-Whisper.

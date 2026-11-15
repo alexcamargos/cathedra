@@ -61,6 +61,9 @@ O projeto realiza auto-provisao de dependencias nativas quando necessario:
 
 As variaveis de ambiente podem ser definidas em um arquivo `.env` na raiz do projeto (consultar `src/mba_wiki/config.py`):
 
+Para o backend Gemini REST, configure `GEMINI_API_KEY` no ambiente ou no `.env`; a chave nao deve
+ser colocada no repositorio. Caso seja exposta, revogue-a ou rotacione-a no provedor.
+
 ```env
 OBSIDIAN_VAULT_PATH=C:/Caminho/Para/Seu/Vault_MBA
 LLM_PROVIDER=antigravity_cli
