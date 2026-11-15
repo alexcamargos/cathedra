@@ -79,7 +79,8 @@ def test_custom_settings(tmp_path: Path) -> None:
     assert settings.llm_provider == "openai"
     assert settings.llm_model_drafter == "gpt-4o"
     assert settings.llm_model_auditor == "gpt-4o-mini"
-    assert settings.gemini_api_key == "custom-key-123"
+    assert settings.gemini_api_key is not None
+    assert settings.gemini_api_key.get_secret_value() == "custom-key-123"
     assert settings.wiki_path == custom_vault / "01_Wiki_Disciplinas"
 
 
@@ -114,7 +115,8 @@ def test_settings_from_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert settings.llm_provider == "gemini"
     assert settings.llm_model_drafter == "gemini-2.5-pro"
     assert settings.llm_model_auditor == "gemini-2.5-flash"
-    assert settings.gemini_api_key == "test_gemini_api_key_xyz"
+    assert settings.gemini_api_key is not None
+    assert settings.gemini_api_key.get_secret_value() == "test_gemini_api_key_xyz"
 
 
 def test_ensure_vault_directories(tmp_path: Path) -> None:
