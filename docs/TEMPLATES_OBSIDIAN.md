@@ -218,6 +218,9 @@ Arquivo JSON salvo pelo `obsidian_writer.py` para cada execucao do pipeline, reg
   "lesson_title": "Titulo da Aula",
   "processed_date": "2026-11-07",
   "fact_check_passed": true,
+  "source_transcript_filename": "Aula_01.mp4",
+  "source_transcript_path": "C:/caminho/transcricoes/Aula_01.json",
+  "source_transcript_binding": "explicit",
   "total_claims_audited": 12,
   "removed_unsupported_claims": 1,
   "audit_items": [

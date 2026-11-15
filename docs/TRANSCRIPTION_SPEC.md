@@ -50,6 +50,7 @@ class VideoTranscript(BaseModel):
 
     source_filename: str
     discipline_slug: str
+    lesson_number: int | None = Field(default=None, gt=0, strict=True)
     duration_seconds: float
     model_name: str
     compute_type: str
@@ -58,6 +59,8 @@ class VideoTranscript(BaseModel):
     full_text_cleaned: str
     segments: list[TranscriptSegment] = Field(default_factory=list)
 ```
+
+O campo `lesson_number` e opcional para compatibilidade com transcricoes existentes. O lote nao o infere automaticamente do nome do video. Para vincular uma transcricao sem esse campo, informe seu JSON explicitamente em `build-lesson --transcript`; a escolha explicita declara a associacao com a aula. A busca automatica somente usa transcricoes com disciplina e numero da aula preenchidos e correspondentes.
 
 ---
 
