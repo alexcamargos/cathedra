@@ -1066,6 +1066,78 @@ def test_transcribe_batch_with_options(
     assert mock_run.call_args[1]["force"] is True
 
 
+def test_transcribe_batch_rejects_collision_before_initializing_model(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    videos = tmp_path / "videos" / "marketing"
+    videos.mkdir(parents=True)
+    (videos / "aula.mp4").write_bytes(b"video 1")
+    (videos / "aula.mkv").write_bytes(b"video 2")
+    output = tmp_path / "output"
+    transcriber = mocker.patch("mba_wiki.cli.LectureTranscriber")
+    result = cli_runner.invoke(
+        app, ["transcribe-batch", str(videos.parent), "--output-dir", str(output), "--force"]
+    )
+    assert result.exit_code != 0
+    assert "colis" in result.output.lower()
+    transcriber.assert_not_called()
+    assert not output.exists()
+
+
+def test_transcribe_batch_reports_unverified_files_as_pending(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    from mba_wiki.transcription.batch_runner import BatchRunSummary
+
+    videos = tmp_path / "videos"
+    videos.mkdir()
+    mocker.patch("mba_wiki.cli.LectureTranscriber", return_value=mocker.MagicMock())
+    mocker.patch(
+        "mba_wiki.cli.run_transcription_batch",
+        return_value=BatchRunSummary(total_videos_found=1, videos_unverified=1),
+    )
+    result = cli_runner.invoke(app, ["transcribe-batch", str(videos)])
+    assert result.exit_code != 0
+    assert "Transcricoes anteriores nao verificadas: 1" in result.output
+    assert "Pendencias" in result.output
+
+
+def test_transcribe_batch_reports_previous_copy_path(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    from mba_wiki.transcription.batch_runner import BatchRunSummary, DiscoveredVideo, ProgressEvent
+
+    videos = tmp_path / "videos"
+    videos.mkdir()
+    backup = tmp_path / "transcripts" / ".history" / "financas" / "aula.backup.json"
+    mocker.patch("mba_wiki.cli.LectureTranscriber", return_value=mocker.MagicMock())
+
+    def run_fake(**kwargs: Any) -> BatchRunSummary:
+        callback = kwargs["progress_callback"]
+        callback(
+            ProgressEvent(
+                index=1,
+                total=1,
+                video=DiscoveredVideo(video_path=videos / "aula.mp4", discipline_slug="financas"),
+                phase="completed",
+                backup_path=backup,
+            )
+        )
+        return BatchRunSummary(total_videos_found=1, videos_processed=1)
+
+    mocker.patch("mba_wiki.cli.run_transcription_batch", side_effect=run_fake)
+    result = cli_runner.invoke(app, ["transcribe-batch", str(videos)])
+    assert result.exit_code == 0
+    assert "Copia anterior:" in result.output
+    assert str(backup) in result.output
+
+
 def test_build_lesson_with_explicit_transcript(
     cli_runner: CliRunner,
     synthetic_cli_pdf: Path,
