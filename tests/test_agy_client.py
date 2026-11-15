@@ -485,7 +485,7 @@ def test_gemini_rest_client_retries_on_503_and_succeeds(mocker: MockerFixture) -
 
 
 def test_gemini_rest_client_raises_after_exhausting_retries(mocker: MockerFixture) -> None:
-    """Tests that GeminiRESTClient re-raises HTTPStatusError after max_retries.
+    """Tests that GeminiRESTClient reports the status safely after max_retries.
 
     Args:
         mocker: Pytest mock fixture.
@@ -506,7 +506,7 @@ def test_gemini_rest_client_raises_after_exhausting_retries(mocker: MockerFixtur
     mock_post = mocker.patch("httpx.Client.post", side_effect=err_503)
 
     client = GeminiRESTClient(api_key="test-key", model="gemini-4-hydrogen", max_retries=2)
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(RuntimeError, match="HTTP 503"):
         client.generate_text(system_prompt="Sys", user_prompt="User")
 
     assert mock_post.call_count == 3

@@ -73,14 +73,14 @@ def test_create_llm_client_from_arg_and_env(monkeypatch: pytest.MonkeyPatch) -> 
     # From explicit argument
     client_arg = create_llm_client(api_key="explicit_key", model="gemini-custom")
     assert isinstance(client_arg, GeminiRESTClient)
-    assert client_arg.api_key == "explicit_key"
+    assert client_arg.api_key.get_secret_value() == "explicit_key"
     assert client_arg.model == "gemini-custom"
 
     # From environment variable
     monkeypatch.setenv("GEMINI_API_KEY", "env_key")
     client_env = create_llm_client()
     assert isinstance(client_env, GeminiRESTClient)
-    assert client_env.api_key == "env_key"
+    assert client_env.api_key.get_secret_value() == "env_key"
     assert client_env.model == "gemini-2.5-pro"
 
 
