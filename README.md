@@ -100,9 +100,22 @@ uv run mba-wiki build-lesson caminho/para/slide.pdf --discipline lideranca-estra
 ```
 
 Opcoes disponiveis:
-- `--transcript` ou `-t`: Caminho explicito da transcricao da videoaula (se omitido, o sistema busca automaticamente em `data/raw/transcripts/<disciplina>/`).
-- `--title`: Titulo descritivo da aula (caso nao venha do primeiro slide).
+- `--transcript` ou `-T`: Caminho explicito do JSON da transcricao da videoaula.
+- `--title` ou `-t`: Titulo descritivo da aula (caso nao venha do primeiro slide).
 - `--force`: Permite tentar recuperar delimitadores ausentes durante o reprocessamento.
+
+Um caminho explicito deve existir e a disciplina do JSON deve corresponder a aula; se o JSON
+contiver `lesson_number`, ele tambem deve corresponder. Transcricoes antigas sem esse campo podem
+ser usadas por escolha explicita, que declara a associacao com a aula. Sem `--transcript`, o
+programa procura nos diretorios `data/raw/transcripts/<disciplina>/` e `geral/` uma unica
+transcricao com `discipline_slug` e `lesson_number` correspondentes. Candidatas ambiguas ou
+arquivos sem identificacao junto de uma candidata exigem escolha explicita. Se nao houver candidata,
+o comando informa que seguira sem transcricao.
+
+O comando `transcribe-batch` nao infere o numero da aula pelo nome do video; seus JSONs sem
+`lesson_number` devem ser informados explicitamente ate que esse campo seja preenchido com um numero
+confirmado. O relatorio de auditoria registra o caminho absoluto do JSON, o nome do video original
+e se a escolha foi explicita, automatica ou em memoria.
 
 Em paginas de aula existentes, o reprocessamento preserva o frontmatter e as anotacoes fora do
 bloco automatico; o frontmatter pode continuar com metadados da criacao. Se faltarem marcadores,

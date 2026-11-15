@@ -13,7 +13,9 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
 
 1. **Ingestao e Ancoragem (`ingestion_node`):**
    - Extrai texto, tabelas e formulas matematicas (convertidas para LaTeX) do PDF/PPTX dos slides.
-   - Carrega opcionalmente a transcricao da videoaula correspondente (`VideoTranscript`), seja por caminho explicito ou auto-deteccao em `data/raw/transcripts/`.
+   - Carrega opcionalmente a transcricao da videoaula (`VideoTranscript`). A selecao automatica exige `discipline_slug` e `lesson_number` correspondentes e uma candidata inequivoca; diante de candidatas ambiguas ou arquivos nao identificados junto de uma candidata, exige `--transcript`.
+   - Um caminho explicito inexistente ou invalido, uma disciplina divergente ou um numero de aula conflitante interrompem o processamento. Para transcricoes antigas sem `lesson_number`, a escolha explicita declara a associacao e nao comprova o conteudo do video.
+   - Registra o nome do video, o caminho absoluto do JSON e a forma de associacao nos relatorios factuais aprovados e pendentes.
    - Localiza a disciplina e o modulo correspondentes no arquivo `ementa_estruturada.json`.
    - Carrega o curriculo global (`StructuredSyllabus`) para viabilizar conexoes transversais.
    - Produz o payload bruto pareado com as diretrizes curriculares e a bibliografia da materia.
@@ -128,6 +130,7 @@ class TranscriptSegment(BaseModel):
 class VideoTranscript(BaseModel):
     source_filename: str
     discipline_slug: str
+    lesson_number: int | None = Field(default=None, gt=0, strict=True)
     duration_seconds: float = Field(..., ge=0.0)
     model_name: str
     compute_type: str
@@ -146,6 +149,8 @@ class WikiLessonOutput(BaseModel):
     processed_date: date
     source_slide_filename: str
     source_transcript_filename: str | None = None
+    source_transcript_path: str | None = None
+    source_transcript_binding: Literal["explicit", "auto", "in_memory"] | None = None
     fact_check_passed: bool
     removed_unsupported_claims: int
     body_markdown: str
@@ -165,6 +170,9 @@ class LessonAuditReport(BaseModel):
     total_claims_audited: int
     removed_unsupported_claims: int
     audit_items: list[ClaimAuditItem] = Field(default_factory=list)
+    source_transcript_filename: str | None = None
+    source_transcript_path: str | None = None
+    source_transcript_binding: Literal["explicit", "auto", "in_memory"] | None = None
 
 
 class StructuredSyllabus(BaseModel):
@@ -180,6 +188,8 @@ class LessonPipelineState(BaseModel):
     source_slide_filename: str
     slides: list[SlideChunk]
     transcript: VideoTranscript | None = None
+    source_transcript_path: str | None = None
+    source_transcript_binding: Literal["explicit", "auto", "in_memory"] | None = None
     syllabus: SyllabusModule
     full_syllabus: StructuredSyllabus | None = None
     raw_draft: str | None = None
