@@ -222,3 +222,9 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Preservar conteudo manual em indices, Zettels e tensoes; validar delimitadores e recuperar blocos ausentes sem apagar notas; preparar artefatos em area separada e restaurar arquivos quando houver falha durante a substituicao, preservando copias se a restauracao nao for segura.
 - **Arquivos afetados:** `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_exporters.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+## Etapa 36: Associacao segura de transcricoes as aulas
+- **Status:** `[x]`
+- **Escopo:** Validar a transcricao explicita, sua disciplina e numero de aula quando informado; selecionar automaticamente apenas JSONs identificados e sem ambiguidade; registrar origem e metodo nos relatorios aprovados ou pendentes, mantendo compatibilidade por escolha explicita de transcricoes antigas.
+- **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/agents/graph.py`, `src/mba_wiki/cli.py`, `src/mba_wiki/exporters/obsidian_writer.py`, `tests/test_transcript_binding.py`, `docs/SPEC.md`, `docs/TRANSCRIPTION_SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `README.md`.
+- **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
