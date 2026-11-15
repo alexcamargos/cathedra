@@ -101,6 +101,11 @@ def create_initial_state(
     """
     if not slides:
         raise ValueError("Cannot initialize pipeline state with empty slides list.")
+    if transcript is not None:
+        if transcript.discipline_slug != syllabus.discipline_slug:
+            raise ValueError("A disciplina da transcrição não corresponde à disciplina da aula.")
+        if transcript.lesson_number is not None and transcript.lesson_number != lesson_number:
+            raise ValueError("O número da aula na transcrição não corresponde à aula solicitada.")
 
     computed_slug = lesson_slug or slugify(lesson_title)
     return LessonPipelineState(
@@ -114,6 +119,7 @@ def create_initial_state(
         syllabus=syllabus,
         full_syllabus=full_syllabus,
         transcript=transcript,
+        source_transcript_binding="in_memory" if transcript is not None else None,
     )
 
 
@@ -126,6 +132,7 @@ def ingestion_node(
     full_syllabus: StructuredSyllabus | None = None,
     transcript: VideoTranscript | None = None,
     transcript_path: Path | None = None,
+    require_transcript_lesson_number: bool = False,
 ) -> LessonPipelineState:
     """Ingestion graph node extracting slide chunks from disk and anchoring to syllabus.
 
@@ -138,6 +145,7 @@ def ingestion_node(
         full_syllabus: Optional complete StructuredSyllabus of the MBA course.
         transcript: Optional pre-loaded VideoTranscript instance.
         transcript_path: Optional path to a VideoTranscript JSON file on disk.
+        require_transcript_lesson_number: Require explicit lesson identity for auto selection.
 
     Returns:
         Initial LessonPipelineState populated with parsed slide chunks and syllabus.
@@ -149,17 +157,25 @@ def ingestion_node(
     if not slide_path.is_file():
         raise FileNotFoundError(f"Slide file not found: {slide_path}")
 
+    if transcript is not None and transcript_path is not None:
+        raise ValueError("Informe a transcrição em memória ou por caminho, não ambos.")
     resolved_transcript = transcript
-    if resolved_transcript is None and transcript_path is not None and transcript_path.is_file():
+    if transcript_path is not None:
+        if not transcript_path.is_file():
+            raise FileNotFoundError(f"Transcrição não encontrada: {transcript_path}")
         payload = transcript_path.read_text(encoding="utf-8")
         resolved_transcript = VideoTranscript.model_validate_json(payload)
+    if require_transcript_lesson_number and (
+        resolved_transcript is None or resolved_transcript.lesson_number is None
+    ):
+        raise ValueError("A transcrição automática precisa identificar o número da aula.")
 
     slides = parse_slides(slide_path)
     fallback_title = f"Aula {lesson_number:02d}"
     resolved_title = lesson_title or (
         infer_slide_title(slides[0].raw_text, default=fallback_title) if slides else fallback_title
     )
-    return create_initial_state(
+    state = create_initial_state(
         slides=slides,
         syllabus=syllabus,
         lesson_number=lesson_number,
@@ -169,6 +185,10 @@ def ingestion_node(
         full_syllabus=full_syllabus,
         transcript=resolved_transcript,
     )
+    state.source_transcript_path = str(transcript_path.resolve()) if transcript_path else None
+    if transcript_path is not None:
+        state.source_transcript_binding = "auto" if require_transcript_lesson_number else "explicit"
+    return state
 
 
 def finalize_output_node(
@@ -198,6 +218,8 @@ def finalize_output_node(
         processed_date=processed_date or date.today(),
         source_slide_filename=state.source_slide_filename,
         source_transcript_filename=state.transcript.source_filename if state.transcript else None,
+        source_transcript_path=state.source_transcript_path,
+        source_transcript_binding=state.source_transcript_binding,
         fact_check_passed=state.fact_check_passed,
         removed_unsupported_claims=state.removed_unsupported_claims,
         body_markdown=final_body,
