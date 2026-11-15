@@ -16,6 +16,12 @@ from mba_wiki.transcription.bootstrap import (
 )
 from mba_wiki.transcription.cleaner import clean_segments, clean_speech_text
 
+TRANSCRIPTION_LANGUAGE = "pt"
+TRANSCRIPTION_VAD_FILTER = True
+TRANSCRIPTION_BEAM_SIZE = 5
+# Bump this revision whenever extraction, inference or cleaning behavior changes.
+TRANSCRIPTION_PIPELINE_REVISION = "pcm16k-mono-cleaner-v1"
+
 
 class LectureTranscriber:
     """Orchestrates Faster-Whisper audio transcription and speech cleaning.
@@ -89,9 +95,9 @@ class LectureTranscriber:
 
         segments_iter, info = self._model.transcribe(
             str(resolved_audio),
-            language="pt",
-            vad_filter=True,
-            beam_size=5,
+            language=TRANSCRIPTION_LANGUAGE,
+            vad_filter=TRANSCRIPTION_VAD_FILTER,
+            beam_size=TRANSCRIPTION_BEAM_SIZE,
         )
 
         raw_segments: list[TranscriptSegment] = []

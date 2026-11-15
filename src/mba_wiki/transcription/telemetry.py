@@ -26,8 +26,9 @@ class TranscriptionTelemetryItem(BaseModel):
         transcription_seconds: Wall-clock time spent on Faster-Whisper GPU/CPU inference.
         segment_count: Total number of discrete speech segments transcribed.
         word_count: Total word count in cleaned transcript.
-        status: Final status outcome (completed, skipped, or failed).
+        status: Final outcome (completed, skipped, unverified, or failed).
         error_message: Optional error description if the operation failed.
+        backup_path: Path of a preserved previous transcript, if any.
         started_at: UTC timestamp when processing of this file began.
         finished_at: UTC timestamp when processing completed.
         speedup_factor: Computed acceleration ratio (duration / transcription_time).
@@ -44,8 +45,9 @@ class TranscriptionTelemetryItem(BaseModel):
     transcription_seconds: float = 0.0
     segment_count: int = 0
     word_count: int = 0
-    status: Literal["completed", "skipped", "failed"]
+    status: Literal["completed", "skipped", "unverified", "failed"]
     error_message: str | None = None
+    backup_path: str | None = None
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -72,6 +74,7 @@ class BatchExecutionReport(BaseModel):
         total_discovered: Total video media files discovered in the search directory.
         total_completed: Number of files successfully processed and written to disk.
         total_skipped: Number of files bypassed due to pre-existing valid transcripts.
+        total_unverified: Existing transcripts without verifiable checkpoint metadata.
         total_failed: Number of files that encountered unhandled exceptions.
         total_media_duration_seconds: Cumulative audio duration of all processed videos.
         total_wall_clock_seconds: Total wall-clock runtime for the entire batch.
@@ -87,6 +90,7 @@ class BatchExecutionReport(BaseModel):
     total_discovered: int
     total_completed: int
     total_skipped: int
+    total_unverified: int = 0
     total_failed: int
     total_media_duration_seconds: float
     total_wall_clock_seconds: float
@@ -155,10 +159,17 @@ class TranscriptionLogger:
                 f"Whisper: {item.transcription_seconds:.1f}s ({speed}) | "
                 f"Words: {item.word_count}"
             )
+            if item.backup_path:
+                msg += f" | Backup: {item.backup_path}"
         elif item.status == "skipped":
             msg = (
                 f"[{now_str}] SKIPPED   | {item.discipline_slug} | {item.filename} | "
                 "Valid transcript already exists"
+            )
+        elif item.status == "unverified":
+            msg = (
+                f"[{now_str}] UNVERIFIED | {item.discipline_slug} | {item.filename} | "
+                f"{item.error_message}"
             )
         else:
             msg = (
@@ -192,6 +203,7 @@ class TranscriptionLogger:
         """
         completed = [it for it in self._items if it.status == "completed"]
         skipped = [it for it in self._items if it.status == "skipped"]
+        unverified = [it for it in self._items if it.status == "unverified"]
         failed = [it for it in self._items if it.status == "failed"]
 
         total_audio_sec = sum(it.duration_seconds for it in completed)
@@ -208,6 +220,7 @@ class TranscriptionLogger:
             total_discovered=total_discovered,
             total_completed=len(completed),
             total_skipped=len(skipped),
+            total_unverified=len(unverified),
             total_failed=len(failed),
             total_media_duration_seconds=total_audio_sec,
             total_wall_clock_seconds=wall_clock_seconds,
