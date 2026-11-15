@@ -320,6 +320,22 @@ class TranscriptSegment(BaseModel):
         return self
 
 
+class TranscriptCheckpoint(BaseModel):
+    """Identity and effective settings used for a batch transcription."""
+
+    source_relative_path: str = Field(min_length=1)
+    source_size_bytes: int = Field(ge=0)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_name: str = Field(min_length=1)
+    device: str = Field(min_length=1)
+    compute_type: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+    vad_filter: bool
+    beam_size: int = Field(gt=0)
+    engine_version: str = Field(min_length=1)
+    pipeline_revision: str = Field(min_length=1)
+
+
 class VideoTranscript(BaseModel):
     """Schema representing the consolidated transcript artifact of a recorded lecture.
 
@@ -334,6 +350,7 @@ class VideoTranscript(BaseModel):
         full_text_raw: Unfiltered concatenated text of all spoken segments.
         full_text_cleaned: Concatenated cleaned text with conversational fillers purged.
         segments: Ordered collection of individual transcript segments.
+        checkpoint: Optional source identity and settings for verified batch resume.
     """
 
     source_filename: str
@@ -346,6 +363,7 @@ class VideoTranscript(BaseModel):
     full_text_raw: str
     full_text_cleaned: str
     segments: list[TranscriptSegment] = Field(default_factory=list)
+    checkpoint: TranscriptCheckpoint | None = None
 
 
 class LessonPipelineState(BaseModel):
@@ -417,6 +435,7 @@ __all__ = [
     "StructuredSyllabus",
     "SyllabusModule",
     "TranscriptSegment",
+    "TranscriptCheckpoint",
     "VideoTranscript",
     "WikiLessonOutput",
 ]
