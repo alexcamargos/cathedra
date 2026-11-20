@@ -110,6 +110,12 @@ Opcoes disponiveis:
 - `--title` ou `-t`: Titulo descritivo da aula (caso nao venha do primeiro slide).
 - `--force`: Permite tentar recuperar delimitadores ausentes durante o reprocessamento.
 
+Para processar todas as aulas de uma disciplina em ordem numerica (ou toda a ementa em sequencia com `--all`), utilize:
+
+```bash
+uv run mba-wiki build-discipline fundamentos-de-estatistica
+```
+
 Um caminho explicito deve existir e a disciplina do JSON deve corresponder a aula; se o JSON
 contiver `lesson_number`, ele tambem deve corresponder. Transcricoes antigas sem esse campo podem
 ser usadas por escolha explicita, que declara a associacao com a aula. Sem `--transcript`, o

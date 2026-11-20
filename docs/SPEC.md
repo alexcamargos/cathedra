@@ -239,3 +239,9 @@ vault_mba/
     ├── _Indice_Tensoes.md
     └── <tension_slug>.md
 ```
+
+## 5. Orquestração Sequencial por Disciplina (`build-discipline`)
+
+- O comando `build-discipline <discipline_slug>` (ou `--all` para percorrer toda a grade) lê `ementa_estruturada.json` e executa as aulas em ordem numérica crescente a partir dos slides em `data/raw/slides/<discipline_slug>/`.
+- No modo `--all`, as disciplinas seguem estritamente a ordem em que aparecem em `StructuredSyllabus.modules`.
+- Slides com numeração duplicada bloqueiam a execução antes do início do pipeline; quando uma aula falha na auditoria factual (`FactCheckBlockedError`), a sequência é interrompida preservando as aulas já exportadas e gravando o relatório pendente.
