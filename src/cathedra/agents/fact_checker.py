@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.agents.validators import transform_prose_outside_protected
 from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
@@ -247,7 +248,7 @@ def locate_and_apply_remediation(
     if clean_quote in text:
         if replacement is None:
             pattern = re.escape(clean_quote)
-            result = re.sub(rf"\s*{pattern}\s*", " ", text, count=1)
+            result = re.sub(rf"[ \t]*{pattern}[ \t]*", " ", text, count=1)
             return result, True
         return text.replace(clean_quote, replacement, 1), True
 
@@ -357,10 +358,28 @@ def apply_audit_remediations(
                 # Guardrail mode: S2 observation without a proposed fix is logged without blocking
                 continue
 
-    # Normalize whitespace and spacing before punctuation
-    cleaned_text = re.sub(r"[ \t]+", " ", audited_text)
-    cleaned_text = re.sub(r"\s+([.,;!?])", r"\1", cleaned_text)
-    cleaned_text = re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned_text).strip()
+    def _clean_prose_segment(segment: str) -> str:
+        """Normalizes internal horizontal whitespace and stray punctuation spacing in prose.
+
+        Preserves leading indentation on lines (e.g., nested lists) while collapsing
+        duplicate internal spaces created by quote pruning.
+
+        Args:
+            segment: Unprotected prose slice outside code blocks and LaTeX math.
+
+        Returns:
+            Normalized prose slice.
+
+        Raises:
+            None.
+        """
+        cleaned = re.sub(r"(?<=\S)[ \t]{2,}", " ", segment)
+        cleaned = re.sub(r"[ \t]+([.,;!?])", r"\1", cleaned)
+        cleaned = re.sub(r"(?m)[ \t]+$", "", cleaned)
+        cleaned = re.sub(r"(?m)^ (?=\S)(?![-*+\d])", "", cleaned)
+        return re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", cleaned)
+
+    cleaned_text = transform_prose_outside_protected(audited_text, _clean_prose_segment).strip()
 
     fact_check_passed = not has_unresolved_blockers
     return cleaned_text, removed_count, fact_check_passed

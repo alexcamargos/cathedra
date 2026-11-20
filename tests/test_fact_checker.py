@@ -1327,3 +1327,42 @@ def test_audit_lesson_draft_allow_pending_review_blocks_orphan_s1_and_s5(
 
     assert result.fact_check_passed is False
     assert result.has_pending_review is False
+
+
+def test_apply_audit_remediations_preserves_code_block_and_nested_list_indentation() -> None:
+    """Tests that post-remediation cleanup preserves fenced code and nested list indentation.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    raw_text = (
+        "Introdução válida. Frase inventada sem lastro.\n\n"
+        "```python\n"
+        "def media(valores):\n"
+        "    if not valores:\n"
+        "        return 0.0\n"
+        "    return sum(valores) / len(valores)\n"
+        "```\n\n"
+        "- Item principal\n"
+        "  - Subitem aninhado\n"
+    )
+    claim = ClaimAuditItem(
+        claim_id="C1",
+        quote="Frase inventada sem lastro.",
+        category="technical",
+        verdict="unsupported",
+        severity="S4",
+    )
+    cleaned, removed, passed = apply_audit_remediations(raw_text, [claim])
+    assert passed is True
+    assert removed == 1
+    assert "Frase inventada" not in cleaned
+    assert "Introdução válida.\n\n```python\n" in cleaned
+    assert "    if not valores:\n        return 0.0\n" in cleaned
+    assert "  - Subitem aninhado" in cleaned
