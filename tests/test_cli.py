@@ -19,6 +19,8 @@ from cathedra.schemas import (
     AuditClaimsResponse,
     ClaimAuditItem,
     DraftResult,
+    GuardrailIssue,
+    GuardrailResponse,
     LessonAuditReport,
     StructuredSyllabus,
     SyllabusModule,
@@ -319,23 +321,8 @@ def test_build_lesson_full_success(
     )
     fake_llm_client.add_structured_response(draft_result)
 
-    # 2. Fact-Checker response
-    audit_response = AuditClaimsResponse(
-        claims=[
-            ClaimAuditItem(
-                claim_id="CLM-001",
-                quote="O método do VPL desconta fluxos futuros à taxa de capital da firma.",
-                category="technical",
-                verdict="verified",
-                severity=None,
-                evidence_source="Slide 1",
-                evidence_kind="slide",
-                evidence_locator=1,
-                evidence_quote="O VPL desconta fluxos futuros.",
-            )
-        ]
-    )
-    fake_llm_client.add_structured_response(audit_response)
+    # 2. Guardrail response
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
 
     # 3. Humanizer response
     clean_prose = (
@@ -413,9 +400,9 @@ def test_build_lesson_saves_blocked_audit_without_changing_published_files(
         DraftResult(raw_draft="Afirmação falsa.", extracted_zettels=[])
     )
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="C1",
                     quote="Afirmação falsa.",
                     category="technical",
@@ -479,7 +466,7 @@ def test_build_lesson_saves_final_audit_blocker(
         StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
     )
     fake_llm_client.add_structured_response(DraftResult(raw_draft="A taxa é 10%."))
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("A taxa é 20%.")
     fake_llm_client.add_structured_response(
         AuditClaimsResponse(
@@ -541,19 +528,18 @@ def test_build_lesson_rejects_verified_claim_without_located_evidence(
         StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
     )
     fake_llm_client.add_structured_response(DraftResult(raw_draft="A taxa é 20%."))
-    ungrounded = AuditClaimsResponse(
-        claims=[
-            ClaimAuditItem(
+    ungrounded = GuardrailResponse(
+        issues=[
+            GuardrailIssue(
                 claim_id="C1",
                 quote="Trecho externo não localizado no rascunho.",
                 category="metric",
                 verdict="unsupported",
                 severity="S4",
-                evidence_source="Livro de Finanças",
+                reason="Livro de Finanças",
             )
         ]
     )
-    fake_llm_client.add_structured_response(ungrounded)
     fake_llm_client.add_structured_response(ungrounded)
     mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
@@ -677,7 +663,7 @@ def test_build_lesson_exports_dialectical_tensions(
         detected_tensions=[tension],
     )
     fake_llm_client.add_structured_response(draft_result)
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Rascunho polido de finanças corporativas.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
     set_client_override(fake_llm_client)
@@ -884,9 +870,7 @@ def test_build_lesson_with_force_recovers_corrupted_vault(
             cross_links=[],
         )
     )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(claims=[], overall_verdict="approved")
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1204,9 +1188,7 @@ def test_build_lesson_with_explicit_transcript(
             detected_tensions=[],
         )
     )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(claims=[], overall_verdict="approved")
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Texto humanizado sobre o VPL.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1400,7 +1382,7 @@ def test_build_discipline_processes_lessons_in_order_with_auto_transcript(
                 detected_tensions=[],
             )
         )
-        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+        fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
         fake_llm_client.add_text_response(f"Conteúdo da aula {num} sobre estatística.")
         fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1475,7 +1457,7 @@ def test_build_discipline_all_follows_syllabus_order(
                 detected_tensions=[],
             )
         )
-        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+        fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
         fake_llm_client.add_text_response(f"Resumo de {slug}.")
         fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1543,7 +1525,7 @@ def test_build_discipline_stops_on_fact_check_block(
             detected_tensions=[],
         )
     )
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Texto aula 1.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1557,15 +1539,15 @@ def test_build_discipline_stops_on_fact_check_block(
         )
     )
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="CLM-001",
                     quote="Afirmação inventada.",
                     category="technical",
                     verdict="false",
                     severity="S1",
-                    evidence_source="Slide 1",
+                    reason="Slide 1",
                 )
             ]
         )
@@ -1673,13 +1655,13 @@ def test_build_discipline_allow_pending_review_continues_sequence(
     copyfile(synthetic_cli_pdf, disc_slides / "01-Aula.pdf")
     copyfile(synthetic_cli_pdf, disc_slides / "02-Aula.pdf")
 
-    # Lesson 1: verified without locator (triggers repair once, then proceeds as pending_review)
+    # Lesson 1: orphan S4 passes with pending_review flag in single pass
     fake_llm_client.add_structured_response(
         DraftResult(raw_draft="Texto aula 1.", extracted_zettels=[])
     )
-    ungrounded = AuditClaimsResponse(
-        claims=[
-            ClaimAuditItem(
+    ungrounded = GuardrailResponse(
+        issues=[
+            GuardrailIssue(
                 claim_id="C01",
                 quote="Trecho não localizado.",
                 category="technical",
@@ -1689,7 +1671,6 @@ def test_build_discipline_allow_pending_review_continues_sequence(
         ]
     )
     fake_llm_client.add_structured_response(ungrounded)
-    fake_llm_client.add_structured_response(ungrounded)
     fake_llm_client.add_text_response("Texto aula 1.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
@@ -1697,7 +1678,7 @@ def test_build_discipline_allow_pending_review_continues_sequence(
     fake_llm_client.add_structured_response(
         DraftResult(raw_draft="Texto aula 2.", extracted_zettels=[])
     )
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Texto aula 2.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
