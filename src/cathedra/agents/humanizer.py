@@ -65,12 +65,17 @@ def get_humanizer_prompt(prompt_path: Path | None = None) -> str:
 def format_remediation_feedback(
     violations: list[LinterViolation],
     previous_text: str,
+    original_text: str | None = None,
 ) -> str:
     """Formats targeted corrective feedback detailing linter violations for LLM retry.
+
+    When original_text is provided, includes the audited baseline prose as a factual
+    anchor so iterative stylistic retries cannot accumulate semantic drift.
 
     Args:
         violations: List of detected stylistic and mechanical linter violations.
         previous_text: Flawed prose generated in the previous iteration.
+        original_text: Optional original audited prose to preserve as factual anchor.
 
     Returns:
         Formatted prompt directing the LLM to eliminate specific detected infractions.
@@ -87,6 +92,17 @@ def format_remediation_feedback(
         loc = f" (Linha {item.line_number})" if item.line_number else ""
         match_snippet = f": '{item.matched_text}'" if item.matched_text else ""
         lines.append(f"- [{item.rule_id}]{loc} {item.message}{match_snippet}")
+
+    if original_text is not None:
+        lines.extend(
+            [
+                "",
+                "## Texto Auditado Original (Âncora Factual)",
+                "Preserve integralmente números, fórmulas, entidades e regras lógicas abaixo:",
+                "",
+                f"```markdown\n{original_text}\n```",
+            ]
+        )
 
     lines.extend(
         [
@@ -229,6 +245,7 @@ def humanize_text(
             user_prompt = format_remediation_feedback(
                 violations=last_violations,
                 previous_text=current_candidate,
+                original_text=text,
             )
 
         raw_output = client.generate_text(
@@ -274,9 +291,14 @@ def humanize_node(
         Updated LessonPipelineState containing humanized prose and retry count.
 
     Raises:
+        ValueError: If state.audited_markdown is missing (cannot fall back to unaudited raw_draft).
         HumanizerValidationError: If humanizer convergence fails within allowed attempts.
     """
-    text_to_humanize = state.audited_markdown or state.raw_draft or ""
+    if state.audited_markdown is None:
+        raise ValueError(
+            "Cannot humanize lesson without audited_markdown; run fact_check_node first."
+        )
+    text_to_humanize = state.audited_markdown
     result = humanize_text(
         text=text_to_humanize,
         client=client,

@@ -463,3 +463,70 @@ def test_sanitize_markdown_heuristics_preserves_numeric_ranges_code_and_latex() 
     assert "`valor — 1`" in cleaned
     assert "# seta → e travessão — dentro do código" in cleaned
     assert "return '2020–2024'" in cleaned
+
+
+def test_humanize_node_rejects_missing_audited_markdown_without_raw_draft_fallback(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that humanize_node raises ValueError instead of falling back to unaudited raw_draft.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    syllabus = SyllabusModule(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        syllabus_summary="Resumo",
+        topics=["VPL"],
+        bibliography=[],
+    )
+    state = LessonPipelineState(
+        discipline_slug="financas",
+        discipline_name="Finanças",
+        lesson_number=1,
+        lesson_title="VPL",
+        lesson_slug="vpl",
+        source_slide_filename="aula1.pdf",
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="Texto")],
+        syllabus=syllabus,
+        raw_draft="Rascunho não auditado.",
+        audited_markdown=None,
+    )
+
+    with pytest.raises(ValueError, match="audited_markdown"):
+        humanize_node(state=state, client=fake_llm_client)
+    assert fake_llm_client.calls == []
+
+
+def test_humanize_text_retry_includes_original_audited_anchor(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Tests that retry prompts re-anchor the LLM to the original audited text.
+
+    Args:
+        fake_llm_client: Mock LLM client fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    original = "A taxa mínima auditada foi de 12,5% ao ano."
+    fake_llm_client.add_text_response("A taxa mínima auditada — um número alto — foi de 12,5%.")
+    fake_llm_client.add_text_response("A taxa mínima auditada foi de 12,5% ao ano.")
+
+    result = humanize_text(text=original, client=fake_llm_client, max_attempts=3)
+
+    assert result.is_valid is True
+    assert result.retry_count == 2
+    assert len(fake_llm_client.calls) == 2
+    retry_prompt = fake_llm_client.calls[1].user_prompt
+    assert "Texto Auditado Original (Âncora Factual)" in retry_prompt
+    assert original in retry_prompt
