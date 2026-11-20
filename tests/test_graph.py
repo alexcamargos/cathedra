@@ -25,6 +25,8 @@ from cathedra.schemas import (
     AuditClaimsResponse,
     ClaimAuditItem,
     DraftResult,
+    GuardrailIssue,
+    GuardrailResponse,
     LessonPipelineState,
     SlideChunk,
     StructuredSyllabus,
@@ -128,7 +130,7 @@ def test_pipeline_stops_before_humanizer_when_factual_blocker_remains(
         lesson_title="VPL",
         source_slide_filename="aula.pdf",
     )
-    claim = ClaimAuditItem(
+    issue = GuardrailIssue(
         claim_id="C1",
         quote="Afirmação falsa.",
         category="technical",
@@ -138,12 +140,12 @@ def test_pipeline_stops_before_humanizer_when_factual_blocker_remains(
     fake_llm_client.add_structured_response(
         DraftResult(raw_draft="Afirmação falsa.", extracted_zettels=[])
     )
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[claim]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[issue]))
 
     with pytest.raises(RuntimeError, match="auditoria factual"):
         run_lesson_pipeline(state=state, client=fake_llm_client)
 
-    assert state.audit_items == [claim]
+    assert state.audit_items == [issue.to_claim_audit_item()]
     assert state.output is None
     assert state.humanized_markdown is None
     assert [call.call_type for call in fake_llm_client.calls] == ["structured", "structured"]
@@ -184,16 +186,6 @@ def test_pipeline_blocks_claim_introduced_by_humanizer(
         ],
         text_responses=[lesson_text],
     )
-    first_claim = ClaimAuditItem(
-        claim_id="C1",
-        quote="A taxa é 10%.",
-        category="metric",
-        verdict="verified",
-        evidence_source="Slide 1",
-        evidence_kind="slide",
-        evidence_locator=1,
-        evidence_quote="A taxa é 10%.",
-    )
     bad_claim = ClaimAuditItem(
         claim_id="C1",
         quote="A taxa é 20%.",
@@ -204,7 +196,7 @@ def test_pipeline_blocks_claim_introduced_by_humanizer(
     )
     auditor = FakeLLMClient(
         structured_responses=[
-            AuditClaimsResponse(claims=[first_claim]),
+            GuardrailResponse(issues=[]),
             AuditClaimsResponse(claims=[bad_claim]),
         ]
     )
@@ -216,7 +208,7 @@ def test_pipeline_blocks_claim_introduced_by_humanizer(
 
     assert state.output is None
     assert state.fact_check_passed is False
-    assert [item.audit_stage for item in state.audit_items] == ["draft", "final"]
+    assert [item.audit_stage for item in state.audit_items] == ["final"]
     assert state.audit_items[-1].quote == "A taxa é 20%."
     assert len(auditor.calls) == 2
     assert lesson_text in auditor.calls[-1].user_prompt
@@ -235,28 +227,26 @@ def test_pipeline_records_initial_and_final_audits(
         source_slide_filename="aula.pdf",
     )
     client = FakeLLMClient(
-        structured_responses=[DraftResult(raw_draft="A taxa é 10%.")],
+        structured_responses=[DraftResult(raw_draft="A taxa é 10%. Dado inventado.")],
         text_responses=["A taxa usada é 10%."],
     )
     auditor = FakeLLMClient(
         structured_responses=[
-            AuditClaimsResponse(
-                claims=[
-                    ClaimAuditItem(
+            GuardrailResponse(
+                issues=[
+                    GuardrailIssue(
                         claim_id="C1",
-                        quote="A taxa é 10%.",
-                        category="metric",
-                        verdict="verified",
-                        evidence_kind="slide",
-                        evidence_locator=1,
-                        evidence_quote="A taxa é 10%.",
+                        quote="Dado inventado.",
+                        category="technical",
+                        verdict="unsupported",
+                        severity="S4",
                     )
                 ]
             ),
             AuditClaimsResponse(
                 claims=[
                     ClaimAuditItem(
-                        claim_id="C1",
+                        claim_id="C2",
                         quote="A taxa usada é 10%.",
                         category="metric",
                         verdict="verified",
@@ -291,7 +281,7 @@ def test_pipeline_does_not_publish_when_final_auditor_fails(
         structured_responses=[DraftResult(raw_draft="A taxa é 10%.")],
         text_responses=["A taxa usada é 10%."],
     )
-    auditor = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[])])
+    auditor = FakeLLMClient(structured_responses=[GuardrailResponse(issues=[])])
 
     with pytest.raises(RuntimeError, match="No canned response"):
         run_lesson_pipeline(state=state, client=client, auditor_client=auditor)
@@ -440,23 +430,8 @@ def test_run_lesson_pipeline_end_to_end_success(
     )
     fake_llm_client.add_structured_response(draft_result)
 
-    # 2. Fact-Checker response (AuditClaimsResponse)
-    audit_response = AuditClaimsResponse(
-        claims=[
-            ClaimAuditItem(
-                claim_id="CLM-001",
-                quote="O método do VPL desconta fluxos de caixa futuros.",
-                category="technical",
-                verdict="verified",
-                severity=None,
-                evidence_source="Slide 1",
-                evidence_kind="slide",
-                evidence_locator=1,
-                evidence_quote="O VPL desconta fluxos futuros à taxa de oportunidade.",
-            )
-        ]
-    )
-    fake_llm_client.add_structured_response(audit_response)
+    # 2. Guardrail response (GuardrailResponse)
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
 
     # 3. Humanizer response (clean prose string)
     clean_prose = (
@@ -487,8 +462,7 @@ def test_run_lesson_pipeline_end_to_end_success(
     assert output.body_markdown == clean_prose
     assert len(output.extracted_zettels) == 1
     assert output.extracted_zettels[0].slug == "valor-presente-liquido"
-    assert len(output.audit_items) == 1
-    assert output.audit_items[0].claim_id == "CLM-001"
+    assert output.audit_items == []
     assert output.cross_links == []
     assert output.detected_tensions == []
 
@@ -531,16 +505,16 @@ def test_execute_pipeline_remediates_unsupported_claims(
     )
     fake_llm_client.add_structured_response(DraftResult(raw_draft=flawed_draft))
 
-    # 2. Fact-Checker response flagging S4
-    audit_response = AuditClaimsResponse(
-        claims=[
-            ClaimAuditItem(
+    # 2. Guardrail response flagging S4
+    audit_response = GuardrailResponse(
+        issues=[
+            GuardrailIssue(
                 claim_id="CLM-001",
                 quote="A empresa XYZ aumentou seus lucros em 800% após adotar o VPL em 1920.",
                 category="metric",
                 verdict="unsupported",
                 severity="S4",
-                evidence_source="Nenhum slide menciona a empresa XYZ ou 1920.",
+                reason="Nenhum slide menciona a empresa XYZ ou 1920.",
             )
         ]
     )
@@ -591,7 +565,7 @@ def test_run_lesson_pipeline_aborts_on_humanizer_failure(
     draft_result = DraftResult(raw_draft="Texto com rascunho de aula.")
     fake_llm_client.add_structured_response(draft_result)
 
-    audit_response = AuditClaimsResponse(claims=[])
+    audit_response = GuardrailResponse(issues=[])
     fake_llm_client.add_structured_response(audit_response)
 
     # 3 persistent bad attempts with an em-dash to trigger HumanizerValidationError
@@ -764,7 +738,7 @@ def test_run_lesson_pipeline_propagates_tensions_to_output(
     )
     fake_llm_client.add_structured_response(draft_result)
 
-    audit_response = AuditClaimsResponse(claims=[])
+    audit_response = GuardrailResponse(issues=[])
     fake_llm_client.add_structured_response(audit_response)
 
     clean_humanized = "O método do VPL orienta a alocação ótima de capital."
@@ -832,7 +806,7 @@ def test_pipeline_with_transcript(
     )
     fake_llm_client.add_structured_response(draft_result)
 
-    audit_response = AuditClaimsResponse(claims=[])
+    audit_response = GuardrailResponse(issues=[])
     fake_llm_client.add_structured_response(audit_response)
 
     clean_humanized = "O método do VPL orienta a alocação ótima de capital."
@@ -853,7 +827,6 @@ def test_execute_pipeline_final_stage_uses_invariance_without_transcript_payload
     from cathedra.agents.graph import create_initial_state, execute_pipeline
     from cathedra.schemas import (
         AuditClaimsResponse,
-        ClaimAuditItem,
         DraftResult,
         SlideChunk,
         SyllabusModule,
@@ -901,21 +874,7 @@ def test_execute_pipeline_final_stage_uses_invariance_without_transcript_payload
     fake_llm_client.add_structured_response(
         DraftResult(raw_draft="A média é a soma sobre n.", extracted_zettels=[])
     )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
-                    claim_id="C1",
-                    quote="A média é a soma sobre n.",
-                    category="technical",
-                    verdict="verified",
-                    evidence_kind="slide",
-                    evidence_locator=1,
-                    evidence_quote="A média é a soma sobre n.",
-                )
-            ]
-        )
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
     fake_llm_client.add_text_response("Calcula-se a média pela soma dividida por n.")
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 

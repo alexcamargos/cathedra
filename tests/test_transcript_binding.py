@@ -14,8 +14,9 @@ from cathedra.agents.graph import ingestion_node
 from cathedra.cli import app
 from cathedra.schemas import (
     AuditClaimsResponse,
-    ClaimAuditItem,
     DraftResult,
+    GuardrailIssue,
+    GuardrailResponse,
     LessonAuditReport,
     SlideChunk,
     StructuredSyllabus,
@@ -80,7 +81,7 @@ def environment(
     client = FakeLLMClient(
         structured_responses=[
             DraftResult(raw_draft="Conteúdo da aula."),
-            AuditClaimsResponse(claims=[]),
+            GuardrailResponse(issues=[]),
             AuditClaimsResponse(claims=[]),
         ],
         text_responses=["Conteúdo da aula."],
@@ -219,9 +220,9 @@ def test_blocked_audit_records_transcript_provenance(
     client = FakeLLMClient(
         structured_responses=[
             DraftResult(raw_draft="Afirmação falsa."),
-            AuditClaimsResponse(
-                claims=[
-                    ClaimAuditItem(
+            GuardrailResponse(
+                issues=[
+                    GuardrailIssue(
                         claim_id="C1",
                         quote="Afirmação falsa.",
                         category="technical",
