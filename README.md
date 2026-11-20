@@ -120,7 +120,9 @@ o comando informa que seguira sem transcricao.
 
 O comando `transcribe-batch` nao infere o numero da aula pelo nome do video; seus JSONs sem
 `lesson_number` devem ser informados explicitamente ate que esse campo seja preenchido com um numero
-confirmado. O relatorio de auditoria registra o caminho absoluto do JSON, o nome do video original
+confirmado. Para preencher `discipline_slug` e `lesson_number` em lote a partir da ementa e dos
+prefixos numericos sem retranscrever os videos, use `uv run mba-wiki bind-transcripts --dry-run` e
+depois execute sem `--dry-run`. O relatorio de auditoria registra o caminho absoluto do JSON, o nome do video original
 e se a escolha foi explicita, automatica ou em memoria.
 
 Em paginas de aula existentes, o reprocessamento preserva o frontmatter e as anotacoes fora do

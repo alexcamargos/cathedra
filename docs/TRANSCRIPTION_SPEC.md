@@ -124,3 +124,9 @@ O campo `lesson_number` e opcional para compatibilidade com transcricoes existen
 - O lote nao migra automaticamente JSONs antigos. A funcao de migracao separada rejeita lotes com colisoes antes de mover arquivos.
 - A revisao do pipeline deve ser incrementada quando mudarem os parametros de extracao, inferencia ou limpeza que influenciam o resultado.
 - Registra logs detalhados de tempo decorrido, taxa de aceleração em relação ao tempo real e consumo de VRAM.
+
+
+### 4.6. Vinculação em Lote à Ementa (`binder.py`)
+- Lê `ementa_estruturada.json` e pareia subpastas de `data/raw/transcripts/` com os `discipline_slug` oficiais da ementa, corrigindo slugs legados sem invalidar o `checkpoint` existente.
+- Extrai `lesson_number` pelo prefixo numérico do nome do arquivo, rejeitando numerações duplicadas (ambíguas) ou ausentes e reportando pastas fora da grade regular (como `palestras`) e divergências com `data/raw/slides/`.
+- Suporta simulação com `--dry-run` e grava alterações atomicamente preservando histórico em `.history/<disciplina>/`.
