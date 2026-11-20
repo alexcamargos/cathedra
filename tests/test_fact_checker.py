@@ -1366,3 +1366,45 @@ def test_apply_audit_remediations_preserves_code_block_and_nested_list_indentati
     assert "Introdução válida.\n\n```python\n" in cleaned
     assert "    if not valores:\n        return 0.0\n" in cleaned
     assert "  - Subitem aninhado" in cleaned
+
+
+def test_audit_humanized_invariance_compares_only_mutated_zettels_with_baseline(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Invariance audit sends before/after pairs only for zettels rewritten by humanizer."""
+    from cathedra.agents.fact_checker import audit_humanized_invariance
+
+    unchanged_before = AtomicZettel(
+        slug="zettel-intocado",
+        title="Intocado",
+        domain_tags=["estatistica"],
+        content_markdown="Conteúdo igual antes e depois.",
+        related_links=[],
+    )
+    changed_before = AtomicZettel(
+        slug="zettel-reescrito",
+        title="Reescrito",
+        domain_tags=["estatistica"],
+        content_markdown="A taxa auditada é 10% — valor original.",
+        related_links=[],
+    )
+    changed_after = changed_before.model_copy(
+        update={"content_markdown": "A taxa auditada é 10%, mantendo o valor original."}
+    )
+
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    result = audit_humanized_invariance(
+        audited_markdown="Corpo auditado.",
+        humanized_markdown="Corpo humanizado.",
+        client=fake_llm_client,
+        zettels=[unchanged_before.model_copy(deep=True), changed_after],
+        audited_zettels=[unchanged_before, changed_before],
+    )
+
+    assert result.fact_check_passed is True
+    assert fake_llm_client.last_call is not None
+    prompt = fake_llm_client.last_call.user_prompt
+    assert "zettel-reescrito" in prompt
+    assert "A taxa auditada é 10% — valor original." in prompt
+    assert "A taxa auditada é 10%, mantendo o valor original." in prompt
+    assert "zettel-intocado" not in prompt
