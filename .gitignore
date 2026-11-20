@@ -1,17 +1,22 @@
 # Python-generated files
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+*.egg
+.eggs/
 
 # Virtual environments
-.venv
+.venv/
+venv/
 
 # Testing, typing and linting artifacts
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .pytest_cache/
 .mypy_cache/
@@ -19,13 +24,26 @@ htmlcov/
 
 # Data directories (Medallion layers)
 data/
-data/raw/
-data/interim/
-data/processed/
 
-# Scratch & volatile files
+# Scratch, logs & volatile files
 scratch/
 logs/
 *.log
+*.tmp
+.cathedra-export-*/
+
+# Secrets & environment files
 .env
+.env.*
+!.env.example
+
+# Local Obsidian vaults
 vault_cathedra/
+vault_mba/
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
