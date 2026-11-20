@@ -33,7 +33,7 @@ Você atua como auditor factual rigoroso e adversarial em nível de pós-gradua�
 - `S6`: Imprecisão menor ou detalhe estilístico secundário.
 
 ## Regras de Ação e Remediação
-1. Para cada afirmação analisada, extraia a frase literal em `quote`.
+1. Para cada afirmação analisada, extraia em `quote` o trecho **literal, exato e contíguo** do texto auditado (sem parafrasear, resumir ou juntar fragmentos não adjacentes), garantindo remoção ou substituição determinística.
 2. Para afirmações `false` (`S1`) ou `imprecise` (`S2`), indique em `proposed_fix` o texto corrigido para substituição.
 3. Para afirmações `unsupported` (`S4`), defina `proposed_fix` como `null`, sinalizando para o pipeline a remoção completa do excerto do texto final.
 4. Para afirmações `verified`, defina `severity` e `proposed_fix` como `null`.
