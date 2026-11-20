@@ -364,8 +364,13 @@ def test_format_drafter_user_prompt_with_full_syllabus() -> None:
     assert "Finanças Corporativas" in prompt
     assert "VPL" in prompt
     assert "WACC" in prompt
-    # Current module shouldn't duplicate in the external list or should be clearly delineated
+    # Current module is anchored in Section 2 and must not be duplicated in the global list
     assert "gestao-estrategica" in prompt
+    global_section = prompt.split("## Visão Global do Currículo do MBA", 1)[1].split(
+        "## Conteúdo Bruto Extraído dos Slides", 1
+    )[0]
+    assert "gestao-estrategica" not in global_section
+    assert "*(Disciplina Atual)*" not in global_section
 
 
 def test_generate_draft_with_full_syllabus_and_tensions(fake_llm_client: FakeLLMClient) -> None:

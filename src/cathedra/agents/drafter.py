@@ -81,24 +81,24 @@ def format_drafter_user_prompt(
 
     # 3. Global Curriculum Context (Cross-Discipline Insights)
     if full_syllabus and full_syllabus.modules:
-        curriculum_lines: list[str] = [
-            "## Visão Global do Currículo do MBA (Conexões Interdisciplinares)\n"
-            "Abaixo estão os módulos curriculares do MBA com seus tópicos chave. "
-            "Utilize esta visão sistêmica para identificar conexões transversais "
-            "(`cross_links`) e dilemas gerenciais dialéticos (`detected_tensions`):\n"
+        external_modules = [
+            module
+            for module in full_syllabus.modules
+            if module.discipline_slug != syllabus.discipline_slug
         ]
-        for module in full_syllabus.modules:
-            topics_summary = ", ".join(module.topics) if module.topics else "Geral"
-            prefix = (
-                "*(Disciplina Atual)* "
-                if module.discipline_slug == syllabus.discipline_slug
-                else ""
-            )
-            curriculum_lines.append(
-                f"- {prefix}**{module.discipline_name}** "
-                f"(`{module.discipline_slug}`): {topics_summary}"
-            )
-        sections.append("\n".join(curriculum_lines))
+        if external_modules:
+            curriculum_lines: list[str] = [
+                "## Visão Global do Currículo do MBA (Conexões Interdisciplinares)\n"
+                "Abaixo estão os demais módulos curriculares do MBA com seus tópicos chave. "
+                "Utilize esta visão sistêmica para identificar conexões transversais "
+                "(`cross_links`) e dilemas gerenciais dialéticos (`detected_tensions`):\n"
+            ]
+            for module in external_modules:
+                topics_summary = ", ".join(module.topics) if module.topics else "Geral"
+                curriculum_lines.append(
+                    f"- **{module.discipline_name}** (`{module.discipline_slug}`): {topics_summary}"
+                )
+            sections.append("\n".join(curriculum_lines))
 
     # 4. Slide Content Payloads
     slides_context_parts: list[str] = ["## Conteúdo Bruto Extraído dos Slides"]
