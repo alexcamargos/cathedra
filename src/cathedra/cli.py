@@ -1,4 +1,4 @@
-"""Command line interface (CLI) for the MBA Wiki Engine using Typer.
+"""Command line interface (CLI) for the Cathedra using Typer.
 
 Exposes primary entrypoint commands:
 - init-syllabus: Parses and persists structured syllabus from course program documents.
@@ -24,43 +24,43 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import typer
 
-from mba_wiki.agents.graph import (
+from cathedra.agents.graph import (
     FactCheckBlockedError,
     find_syllabus_module,
     ingestion_node,
     run_lesson_pipeline,
     slugify,
 )
-from mba_wiki.agents.llm_client import StructuredLLMClient, create_llm_client
-from mba_wiki.config import get_settings
-from mba_wiki.exporters.obsidian_writer import (
+from cathedra.agents.llm_client import StructuredLLMClient, create_llm_client
+from cathedra.config import get_settings
+from cathedra.exporters.obsidian_writer import (
     export_lesson_to_vault,
     write_blocked_audit_report,
     write_tensions_index,
 )
-from mba_wiki.ingestion.syllabus_parser import (
+from cathedra.ingestion.syllabus_parser import (
     load_structured_syllabus,
     process_and_save_syllabus,
 )
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     DialecticalTension,
     StructuredSyllabus,
     SyllabusModule,
     VideoTranscript,
 )
-from mba_wiki.transcription.batch_runner import (
+from cathedra.transcription.batch_runner import (
     ProgressEvent,
     discover_lecture_videos,
     run_transcription_batch,
     validate_destination_collisions,
 )
-from mba_wiki.transcription.binder import bind_transcripts_to_syllabus, extract_lesson_number
-from mba_wiki.transcription.telemetry import TranscriptionLogger
-from mba_wiki.transcription.transcriber import LectureTranscriber
+from cathedra.transcription.binder import bind_transcripts_to_syllabus, extract_lesson_number
+from cathedra.transcription.telemetry import TranscriptionLogger
+from cathedra.transcription.transcriber import LectureTranscriber
 
 app = typer.Typer(
-    name="mba-wiki",
-    help="MBA Wiki Engine: automação de notas acadêmicas no Obsidian.",
+    name="cathedra",
+    help="Cathedra: automação de notas acadêmicas no Obsidian.",
     no_args_is_help=True,
 )
 
@@ -290,6 +290,13 @@ def build_lesson(
             help="Força reprocessamento e recupera delimitadores HTML corrompidos no cofre.",
         ),
     ] = False,
+    allow_pending_review: Annotated[
+        bool,
+        typer.Option(
+            "--allow-pending-review",
+            help="Publica com aviso pending_review se restarem apenas pendências não críticas.",
+        ),
+    ] = False,
 ) -> None:
     """Executa o pipeline completo de uma aula e exporta os arquivos para o Obsidian Vault.
 
@@ -353,6 +360,7 @@ def build_lesson(
         transcript=transcript,
         transcripts_root=Path("data/raw/transcripts"),
         force=force,
+        allow_pending_review=allow_pending_review,
     )
 
 
@@ -368,6 +376,7 @@ def _execute_single_lesson(
     transcript: Path | None,
     transcripts_root: Path,
     force: bool,
+    allow_pending_review: bool = False,
 ) -> None:
     """Executes the full pipeline and vault export for a single lesson.
 
@@ -424,6 +433,7 @@ def _execute_single_lesson(
             state=state,
             client=drafter_client,
             auditor_client=auditor_client,
+            allow_pending_review=allow_pending_review,
         )
         export_result = export_lesson_to_vault(
             vault_root=vault_root,
@@ -433,6 +443,8 @@ def _execute_single_lesson(
         )
 
         typer.echo(f"Aula {lesson:02d} processada com sucesso!")
+        if output.has_pending_review:
+            typer.echo("Aviso: aula exportada com pendências de revisão factual (pending_review).")
         typer.echo(f"- Wiki da Aula: {export_result.lesson_path}")
         if output.source_transcript_filename:
             typer.echo(f"- Transcrição Vinculada: {output.source_transcript_filename}")
@@ -551,6 +563,13 @@ def build_discipline(
             help="Força reprocessamento de arquivos e recuperação de delimitadores.",
         ),
     ] = False,
+    allow_pending_review: Annotated[
+        bool,
+        typer.Option(
+            "--allow-pending-review",
+            help="Publica com aviso pending_review e continua o lote diante de pendências.",
+        ),
+    ] = False,
 ) -> None:
     """Processa em sequência todas as aulas de uma disciplina ou de toda a ementa.
 
@@ -653,6 +672,7 @@ def build_discipline(
                 transcript=None,
                 transcripts_root=transcripts_dir,
                 force=force,
+                allow_pending_review=allow_pending_review,
             )
             processed_lessons += 1
 
