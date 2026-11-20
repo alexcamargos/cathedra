@@ -292,3 +292,41 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Atualizar `src/cathedra/agents/prompts/fact_checker.md` para operar como guardrail focado exclusivamente em alucinações graves (`S4`) e erros materiais (`S1`/`S2`/`S3`/`S5`), retornando `claims: []` quando coerente com as fontes. Em `src/cathedra/agents/fact_checker.py`, manter `locate_evidence_source` como enriquecimento de rastreabilidade sem bloquear itens `verified` por ausência de substring literal.
 - **Arquivos afetados:** `src/cathedra/agents/prompts/fact_checker.md`, `src/cathedra/agents/fact_checker.py`, `tests/test_fact_checker.py`, `tests/test_cli.py`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+---
+
+## Etapa 47: Novo Guardrail Anti-Alucinacao do Cathedra (Skill, Schema Enxuto e Passada Unica)
+- **Status:** `[ ]`
+- **Escopo:** Substituir a heranca forense citacao a citacao de `skills/fact-check.md` por uma skill e contrato proprios de guardrail em `skills/cathedra-guardrail.md` e `src/cathedra/agents/prompts/fact_checker.md`, mantendo como referencias exclusivas o conteudo das aulas (slides/PDF e transcricoes) sem bloquear explicacoes didaticas coerentes. Criar schema enxuto de desvios (`GuardrailResponse` / `GuardrailIssue`) em `src/cathedra/schemas.py` sem campos de citacao obrigatoria para `verified`, adicionar `has_pending_review` em `LessonAuditReport`, remover o loop oculto de reparo (`max_repair_attempts`) e a injecao de `syllabus.bibliography` em `src/cathedra/agents/fact_checker.py`, evitar mutacao in-place de Zettels/Tensoes, corrigir `_has_unresolved_critical_claims` para cobrir desvios criticos `S1`/`S5`/`S4` orfaos ou em Zettels/Tensoes, e remover duplicacao da disciplina atual em `src/cathedra/agents/drafter.py`.
+- **Arquivos afetados:** `skills/cathedra-guardrail.md`, `src/cathedra/schemas.py`, `src/cathedra/agents/prompts/fact_checker.md`, `src/cathedra/agents/fact_checker.py`, `src/cathedra/agents/drafter.py`, `tests/test_fact_checker.py`, `tests/test_drafter.py`, `tests/test_schemas.py`.
+- **Criterio de aceite:** Testes unitarios validando schema enxuto de guardrail, passada unica sem loop de reparo, bloqueio estrito de `S1`/`S5` criticos inclusive orfaos e em Zettels/Tensoes, ausencia de `bibliography` no prompt do auditor e aprovacao de explicacoes didaticas sem bloqueio por `S2`/`S6` leve, passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 48: Normalizacao de Quebras de Linha Literais e Mascaramento de Regioes Protegidas
+- **Status:** `[ ]`
+- **Escopo:** Normalizar sequencias literais `\n` fora de blocos de codigo e comandos LaTeX na deserializacao de `DraftResult` em `src/cathedra/schemas.py`, adicionar regra bloqueante `R5_LITERAL_NEWLINE` em `src/cathedra/agents/validators.py`, mascarar codigo/LaTeX/faixas numericas em `sanitize_markdown_heuristics` (`src/cathedra/agents/humanizer.py`) e preservar indentacao de blocos de codigo e listas na limpeza pos-remediacao em `src/cathedra/agents/fact_checker.py`.
+- **Arquivos afetados:** `src/cathedra/schemas.py`, `src/cathedra/agents/validators.py`, `src/cathedra/agents/humanizer.py`, `src/cathedra/agents/fact_checker.py`, `tests/test_schemas.py`, `tests/test_validators.py`, `tests/test_humanizer.py`, `tests/test_fact_checker.py`.
+- **Criterio de aceite:** Testes cobrindo Zettels com `\n\n` literal e listas `R4_AI_BULLET`, faixas numericas `2020–2024`, comandos LaTeX `\nu`/`\neq` e blocos Python indentados passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 49: Blindagem da Camada de Transporte LLM (GeminiRESTClient e extract_json_payload)
+- **Status:** `[ ]`
+- **Escopo:** Atualizar `GeminiRESTClient` em `src/cathedra/agents/llm_client.py` para filtrar partes `thought: true` e concatenar todas as partes de resposta `text`, validar `finishReason` (rejeitando `MAX_TOKENS`, `SAFETY`, `RECITATION`), reutilizar `_build_generation_config` em `generate_text` para paridade de `thinkingConfig` e substituir o corte ingenuo em `extract_json_payload` por decodificacao balanceada com `json.JSONDecoder().raw_decode`.
+- **Arquivos afetados:** `src/cathedra/agents/llm_client.py`, `tests/test_llm_client.py`, `tests/test_agy_client.py`.
+- **Criterio de aceite:** Testes unitarios cobrindo respostas multipart com `thought: true`, erro explicito em `MAX_TOKENS`/`SAFETY`, envio de `thinkingConfig` em `generate_text` e extracao balanceada de JSON passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 50: Invariancia Pos-Humanizador com Baseline e Remocao de Fallbacks Nao Auditados
+- **Status:** `[ ]`
+- **Escopo:** Capturar snapshot dos Zettels pre-humanizador em `src/cathedra/agents/graph.py` e enviar para `audit_humanized_invariance` em `src/cathedra/agents/fact_checker.py` apenas o corpo e os Zettels cujo conteudo mudou (em pares antes/depois por slug), removendo fallbacks `or state.raw_draft` em `src/cathedra/agents/humanizer.py` e `src/cathedra/agents/graph.py` e ancorando retries do Humanizer no `audited_markdown` original.
+- **Arquivos afetados:** `src/cathedra/agents/graph.py`, `src/cathedra/agents/fact_checker.py`, `src/cathedra/agents/prompts/fact_checker_invariance.md`, `src/cathedra/agents/humanizer.py`, `tests/test_graph.py`, `tests/test_humanizer.py`, `tests/test_fact_checker.py`.
+- **Criterio de aceite:** Testes comprovando comparacao antes/depois para Zettels modificados, rejeicao de fallback sem `audited_markdown` e ancora original nos retries do Humanizer passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 51: Persistencia Idempotente no Obsidian, Reparo de Zettels e Higiene de Titulos/cross_links
+- **Status:** `[ ]`
+- **Escopo:** Limpar marcacao Markdown (`**`, `*`, `_`, `` ` ``) em `infer_slide_title` (`src/cathedra/ingestion/slide_parser.py`), atualizar seletivamente chaves de auditoria no frontmatter de aulas em `src/cathedra/exporters/obsidian_writer.py`, persistir `has_pending_review` nos relatorios JSON, suportar atualizacao controlada de Zettels com `AUTO-CONTENT` e `--force` preservando backlinks/notas, e exportar `cross_links` dentro da pagina de aula.
+- **Arquivos afetados:** `src/cathedra/ingestion/slide_parser.py`, `src/cathedra/exporters/obsidian_writer.py`, `src/cathedra/cli.py`, `tests/test_slide_parser.py`, `tests/test_exporters.py`, `tests/test_cli.py`.
+- **Criterio de aceite:** Testes com `tmp_path` validando atualizacao de `fact_check_status`, reparo de Zettels com `--force`, limpeza de titulos e exportacao idempotente de `cross_links` passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 52: Calibragem de Falsos Positivos no Linter e Sincronizacao Documental
+- **Status:** `[ ]`
+- **Escopo:** Refinar `r"\bmais do que\b"` em `L2_EMPTY_APHORISM` para capturar apenas cliches retoricos, excluir listas simples de `R3_PARAGRAPH_LENGTH` e expandir `RE_ABBREVIATIONS` em `src/cathedra/agents/validators.py`. Sincronizar `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `docs/LINTER_RULES.md` e `README.md` com o guardrail anti-alucinacao e os contratos atuais.
+- **Arquivos afetados:** `src/cathedra/agents/validators.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `docs/LINTER_RULES.md`, `README.md`, `tests/test_validators.py`.
+- **Criterio de aceite:** Testes de linter validando comparacoes quantitativas e listas simples e documentacao alinhada aos schemas passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
