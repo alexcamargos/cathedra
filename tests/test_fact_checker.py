@@ -946,3 +946,70 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
     user_prompt = fake_llm_client.last_call.user_prompt
     assert "Fonte 3: Transcrição da Fala do Professor na Videoaula" in user_prompt
     assert "O professor mencionou o caso real da fusão Ambev em 1999." in user_prompt
+
+
+def test_locate_evidence_source_strips_stray_markdown_backticks_and_quotes() -> None:
+    """Matches slide evidence even when evidence_quote has stray outer backticks."""
+    from mba_wiki.agents.fact_checker import locate_evidence_source
+
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Medidas de Forma"],
+        bibliography=[],
+    )
+    slides = [
+        SlideChunk(
+            slide_number=24,
+            title="Medidas de Forma",
+            raw_text="Fonte: Fávero e Belfiore (2024, Cap. 2)",
+        )
+    ]
+    item = ClaimAuditItem(
+        claim_id="C18",
+        quote="Medidas de Forma.",
+        category="attribution",
+        verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=24,
+        evidence_quote="Fonte: Fávero e Belfiore (2024, Cap. 2)`",
+    )
+
+    assert locate_evidence_source(item, slides, syllabus, None) == "Slide 24"
+
+
+def test_locate_evidence_source_rejects_empty_after_stripping_or_missing_quote() -> None:
+    """Returns None when evidence_quote is only punctuation/backticks or absent from source."""
+    from mba_wiki.agents.fact_checker import locate_evidence_source
+
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Medidas de Forma"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Intro", raw_text="Texto real do slide.")]
+
+    empty_item = ClaimAuditItem(
+        claim_id="C1",
+        quote="Algo.",
+        category="technical",
+        verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="``",
+    )
+    missing_item = ClaimAuditItem(
+        claim_id="C2",
+        quote="Algo.",
+        category="technical",
+        verdict="verified",
+        evidence_kind="slide",
+        evidence_locator=1,
+        evidence_quote="`Trecho inventado`",
+    )
+
+    assert locate_evidence_source(empty_item, slides, syllabus, None) is None
+    assert locate_evidence_source(missing_item, slides, syllabus, None) is None

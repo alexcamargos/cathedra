@@ -148,11 +148,14 @@ def locate_evidence_source(
 ) -> str | None:
     """Return a canonical location only if the excerpt occurs in supplied material."""
     quote = item.evidence_quote
-    if not quote or not quote.strip():
+    if not quote:
+        return None
+    cleaned_quote = quote.strip(" \t\r\n`\"'“”‘’")
+    if not cleaned_quote:
         return None
 
     def contains(text: str) -> bool:
-        return " ".join(quote.split()).casefold() in " ".join(text.split()).casefold()
+        return " ".join(cleaned_quote.split()).casefold() in " ".join(text.split()).casefold()
 
     if item.evidence_kind == "slide" and item.evidence_locator is not None:
         matching_slides = [slide for slide in slides if slide.slide_number == item.evidence_locator]
