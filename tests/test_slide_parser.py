@@ -282,6 +282,13 @@ def test_infer_slide_title_helper() -> None:
     empty_text = "   \n\n  "
     assert infer_slide_title(empty_text, "Slide 3") == "Slide 3"
 
+    bold_markdown = "**Análise Estatística Espacial**\nSubtítulo"
+    assert infer_slide_title(bold_markdown, "Slide 4") == "Análise Estatística Espacial"
+
+    heading_with_inline = "# **Fundamentos** de `Estatística` _Aplicada_\nTexto"
+    inferred = infer_slide_title(heading_with_inline, "Slide 5")
+    assert inferred == "Fundamentos de Estatística Aplicada"
+
 
 def test_extract_latex_equations_brackets_and_parentheses() -> None:
     """Tests extraction of LaTeX equations formatted with bracket and parenthesis delimiters.

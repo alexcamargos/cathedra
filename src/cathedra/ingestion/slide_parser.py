@@ -62,15 +62,39 @@ def extract_latex_equations(text: str) -> list[str]:
     return found_equations
 
 
+def _clean_markdown_title(raw_title: str) -> str:
+    """Strips inline Markdown emphasis and code markers from an inferred slide title.
+
+    Args:
+        raw_title: Raw title line extracted from slide text.
+
+    Returns:
+        Clean plain-text title string.
+
+    Raises:
+        None.
+    """
+    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", raw_title)
+    cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+    cleaned = re.sub(r"(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)", r"\1", cleaned)
+    cleaned = re.sub(r"(?<!\w)_(?!\s)(.*?)(?<!\s)_(?!\w)", r"\1", cleaned)
+    cleaned = cleaned.replace("`", "")
+    cleaned = cleaned.strip("*_ \t")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def infer_slide_title(text: str, default: str) -> str:
-    """Infers the slide title from markdown headers or the leading text line.
+    """Infers a clean slide title from markdown headers or the leading text line.
+
+    Strips Markdown emphasis markers (e.g. '**Title**') so inferred titles do not
+    pollute YAML frontmatter, headings, or audit reports.
 
     Args:
         text: Plain text or markdown content of the slide.
         default: Fallback title to use if no valid title line is detected.
 
     Returns:
-        Inferred slide title string.
+        Inferred plain-text slide title string.
 
     Raises:
         None.
@@ -82,11 +106,10 @@ def infer_slide_title(text: str, default: str) -> str:
 
         # Check for Markdown heading (# Title, ## Title, etc.)
         heading_match = re.match(r"^#+\s+(.+)$", trimmed)
-        if heading_match:
-            return heading_match.group(1).strip()
-
-        # Fallback to the first non-empty text line
-        return trimmed[:100].strip()
+        candidate = heading_match.group(1).strip() if heading_match else trimmed[:100].strip()
+        cleaned = _clean_markdown_title(candidate)
+        if cleaned:
+            return cleaned
 
     return default
 
