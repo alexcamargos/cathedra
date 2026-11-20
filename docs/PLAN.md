@@ -314,7 +314,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes unitarios cobrindo respostas multipart com `thought: true`, erro explicito em `MAX_TOKENS`/`SAFETY`, envio de `thinkingConfig` em `generate_text` e extracao balanceada de JSON passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 50: Invariancia Pos-Humanizador com Baseline e Remocao de Fallbacks Nao Auditados
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Capturar snapshot dos Zettels pre-humanizador em `src/cathedra/agents/graph.py` e enviar para `audit_humanized_invariance` em `src/cathedra/agents/fact_checker.py` apenas o corpo e os Zettels cujo conteudo mudou (em pares antes/depois por slug), removendo fallbacks `or state.raw_draft` em `src/cathedra/agents/humanizer.py` e `src/cathedra/agents/graph.py` e ancorando retries do Humanizer no `audited_markdown` original.
 - **Arquivos afetados:** `src/cathedra/agents/graph.py`, `src/cathedra/agents/fact_checker.py`, `src/cathedra/agents/prompts/fact_checker_invariance.md`, `src/cathedra/agents/humanizer.py`, `tests/test_graph.py`, `tests/test_humanizer.py`, `tests/test_fact_checker.py`.
 - **Criterio de aceite:** Testes comprovando comparacao antes/depois para Zettels modificados, rejeicao de fallback sem `audited_markdown` e ancora original nos retries do Humanizer passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
