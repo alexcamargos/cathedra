@@ -11,7 +11,7 @@ from typing import Any
 import pymupdf
 import pytest
 
-from mba_wiki.agents.graph import (
+from cathedra.agents.graph import (
     create_initial_state,
     execute_pipeline,
     find_syllabus_module,
@@ -19,8 +19,8 @@ from mba_wiki.agents.graph import (
     run_lesson_pipeline,
     slugify,
 )
-from mba_wiki.agents.humanizer import HumanizerValidationError
-from mba_wiki.schemas import (
+from cathedra.agents.humanizer import HumanizerValidationError
+from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
@@ -723,7 +723,7 @@ def test_run_lesson_pipeline_propagates_tensions_to_output(
     Raises:
         None.
     """
-    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+    from cathedra.schemas import CrossDisciplineLink, DialecticalTension
 
     slide = SlideChunk(
         slide_number=1,
@@ -801,7 +801,7 @@ def test_pipeline_with_transcript(
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     transcript = VideoTranscript(
         source_filename="Aula_01_Financas.mp4",
@@ -842,3 +842,85 @@ def test_pipeline_with_transcript(
     output = run_lesson_pipeline(state=state, client=fake_llm_client)
 
     assert output.source_transcript_filename == "Aula_01_Financas.mp4"
+
+
+def test_execute_pipeline_final_stage_uses_invariance_without_transcript_payload(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Final audit stage compares humanized text against audited prose without raw transcript."""
+    from datetime import UTC, datetime
+
+    from cathedra.agents.graph import create_initial_state, execute_pipeline
+    from cathedra.schemas import (
+        AuditClaimsResponse,
+        ClaimAuditItem,
+        DraftResult,
+        SlideChunk,
+        SyllabusModule,
+        TranscriptSegment,
+        VideoTranscript,
+    )
+
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Base.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+    transcript = VideoTranscript(
+        source_filename="aula01.mp4",
+        discipline_slug="estatistica",
+        lesson_number=1,
+        duration_seconds=60.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime(2026, 11, 9, 2, 0, tzinfo=UTC),
+        full_text_raw="marcador-unico-transcricao",
+        full_text_cleaned="marcador-unico-transcricao",
+        segments=[
+            TranscriptSegment(
+                id=1,
+                start=0.0,
+                end=5.0,
+                text_raw="marcador-unico-transcricao",
+                text_cleaned="marcador-unico-transcricao",
+            )
+        ],
+    )
+    state = create_initial_state(
+        slides=slides,
+        syllabus=syllabus,
+        lesson_number=1,
+        lesson_title="Média",
+        source_slide_filename="aula.pdf",
+        transcript=transcript,
+    )
+
+    fake_llm_client.add_structured_response(
+        DraftResult(raw_draft="A média é a soma sobre n.", extracted_zettels=[])
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C1",
+                    quote="A média é a soma sobre n.",
+                    category="technical",
+                    verdict="verified",
+                    evidence_kind="slide",
+                    evidence_locator=1,
+                    evidence_quote="A média é a soma sobre n.",
+                )
+            ]
+        )
+    )
+    fake_llm_client.add_text_response("Calcula-se a média pela soma dividida por n.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    result_state = execute_pipeline(state=state, client=fake_llm_client)
+    assert result_state.fact_check_passed is True
+    final_call = fake_llm_client.calls[-1]
+    assert "Texto Auditado (Referência Aprovada)" in final_call.user_prompt
+    assert "marcador-unico-transcricao" not in final_call.user_prompt

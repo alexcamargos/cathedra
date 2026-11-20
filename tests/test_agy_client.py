@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 from pytest_mock import MockerFixture
 
-from mba_wiki.agents.llm_client import AGYCLIClient, GeminiRESTClient, create_llm_client
+from cathedra.agents.llm_client import AGYCLIClient, GeminiRESTClient, create_llm_client
 
 
 class SampleOutputModel(BaseModel):

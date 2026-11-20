@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
-from mba_wiki.agents.llm_client import GeminiRESTClient, create_llm_client
+from cathedra.agents.llm_client import GeminiRESTClient, create_llm_client
 
 
 class SampleOutputModel(BaseModel):

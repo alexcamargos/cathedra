@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.agents.humanizer import (
+from cathedra.agents.humanizer import (
     HumanizerValidationError,
     format_remediation_feedback,
     get_humanizer_prompt,
     humanize_node,
     humanize_text,
 )
-from mba_wiki.agents.validators import LinterViolation
-from mba_wiki.schemas import (
+from cathedra.agents.validators import LinterViolation
+from cathedra.schemas import (
     AtomicZettel,
     HumanizerResult,
     LessonPipelineState,
@@ -357,7 +357,7 @@ def test_strip_markdown_fences_preserves_internal_code_blocks() -> None:
     Raises:
         None.
     """
-    from mba_wiki.agents.humanizer import strip_markdown_fences
+    from cathedra.agents.humanizer import strip_markdown_fences
 
     wrapped_with_code_at_end = (
         "```markdown\n"

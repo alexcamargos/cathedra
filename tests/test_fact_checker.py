@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.agents.fact_checker import (
+from cathedra.agents.fact_checker import (
     apply_audit_remediations,
     audit_lesson_draft,
     fact_check_node,
     format_fact_checker_user_prompt,
     get_fact_checker_prompt,
 )
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
@@ -73,7 +73,7 @@ def test_verified_claim_requires_located_material_evidence(
         client=client,
     )
     item = result.audit_items[0]
-    assert result.fact_check_passed is expected
+    assert result.fact_check_passed is True
     assert item.evidence_status == ("material_supported" if expected else "pending_review")
     assert item.evidence_source == ("Slide 1" if expected else None)
 
@@ -82,7 +82,7 @@ def test_transcript_evidence_identifies_segment_and_timestamps() -> None:
     """A matching transcript excerpt is traceable without implying independent confirmation."""
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import TranscriptSegment, VideoTranscript
+    from cathedra.schemas import TranscriptSegment, VideoTranscript
 
     syllabus = SyllabusModule(
         discipline_slug="financas",
@@ -132,7 +132,7 @@ def test_transcript_evidence_identifies_segment_and_timestamps() -> None:
     assert result.audit_items[0].evidence_status == "material_supported"
     assert result.audit_items[0].evidence_source == "Transcrição aula.mp4, segmento 7 (12.0s–16.0s)"
     assert client.last_call is not None
-    assert "segmento 7" in client.last_call.user_prompt.lower()
+    assert "[7] a taxa é 10%." in client.last_call.user_prompt.lower()
 
 
 def test_get_fact_checker_prompt_loads_from_markdown() -> None:
@@ -843,7 +843,7 @@ def test_format_fact_checker_user_prompt_with_transcript() -> None:
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     syllabus = SyllabusModule(
         discipline_slug="financas-corporativas",
@@ -893,7 +893,7 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     syllabus = SyllabusModule(
         discipline_slug="financas-corporativas",
@@ -935,6 +935,8 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
                     quote="Na aula foi discutido o caso real da fusão Ambev em 1999.",
                     category="technical",
                     verdict="verified",
+                    evidence_kind="transcript",
+                    evidence_quote="O professor mencionou o caso real da fusão Ambev em 1999.",
                 )
             ]
         )
@@ -950,7 +952,7 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
 
 def test_locate_evidence_source_strips_stray_markdown_backticks_and_quotes() -> None:
     """Matches slide evidence even when evidence_quote has stray outer backticks."""
-    from mba_wiki.agents.fact_checker import locate_evidence_source
+    from cathedra.agents.fact_checker import locate_evidence_source
 
     syllabus = SyllabusModule(
         discipline_slug="estatistica",
@@ -981,7 +983,7 @@ def test_locate_evidence_source_strips_stray_markdown_backticks_and_quotes() -> 
 
 def test_locate_evidence_source_rejects_empty_after_stripping_or_missing_quote() -> None:
     """Returns None when evidence_quote is only punctuation/backticks or absent from source."""
-    from mba_wiki.agents.fact_checker import locate_evidence_source
+    from cathedra.agents.fact_checker import locate_evidence_source
 
     syllabus = SyllabusModule(
         discipline_slug="estatistica",
@@ -1013,3 +1015,294 @@ def test_locate_evidence_source_rejects_empty_after_stripping_or_missing_quote()
 
     assert locate_evidence_source(empty_item, slides, syllabus, None) is None
     assert locate_evidence_source(missing_item, slides, syllabus, None) is None
+
+
+def test_format_fact_checker_user_prompt_compacts_segments_without_duplication() -> None:
+    """Sends compact [Segmento id] text_cleaned lines without duplicating raw or full text."""
+    from datetime import UTC, datetime
+
+    from cathedra.schemas import TranscriptSegment, VideoTranscript
+
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Amostragem"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Intro", raw_text="Amostragem aleatória.")]
+    transcript = VideoTranscript(
+        source_filename="aula01.mp4",
+        discipline_slug="estatistica",
+        duration_seconds=120.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime(2026, 11, 9, 2, 0, tzinfo=UTC),
+        full_text_raw="texto bruto completo unico",
+        full_text_cleaned="texto limpo completo unico",
+        segments=[
+            TranscriptSegment(
+                id=1,
+                start=0.0,
+                end=5.0,
+                text_raw="ah texto bruto segmento",
+                text_cleaned="texto limpo segmento",
+            )
+        ],
+    )
+
+    prompt = format_fact_checker_user_prompt(
+        draft_text="Rascunho.",
+        slides=slides,
+        syllabus=syllabus,
+        transcript=transcript,
+    )
+
+    assert "[1] texto limpo segmento" in prompt
+    assert "texto bruto segmento" not in prompt
+    assert "texto limpo completo unico" not in prompt
+
+
+def test_audit_lesson_draft_repairs_missing_evidence_locator_on_retry(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Recovers on the single repair attempt when first response has an unlocated S4 quote."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="Frase parafraseada que não casa.",
+                    category="technical",
+                    verdict="unsupported",
+                    severity="S4",
+                )
+            ]
+        )
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="Exemplo inventado.",
+                    category="technical",
+                    verdict="unsupported",
+                    severity="S4",
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text="A média é a soma sobre n. Exemplo inventado.",
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+        max_repair_attempts=1,
+    )
+
+    assert result.fact_check_passed is True
+    assert result.removed_unsupported_claims == 1
+    assert len(fake_llm_client.calls) == 2
+    assert "Reparo Obrigatório" in fake_llm_client.calls[1].user_prompt
+
+
+def test_apply_audit_remediations_treats_s6_as_non_blocking() -> None:
+    """Minor stylistic note S6 without fix does not block publication."""
+    items = [
+        ClaimAuditItem(
+            claim_id="C01",
+            quote="Texto principal.",
+            category="technical",
+            verdict="imprecise",
+            severity="S6",
+        )
+    ]
+    cleaned, removed, passed = apply_audit_remediations("Texto principal.", items)
+    assert passed is True
+    assert removed == 0
+    assert cleaned == "Texto principal."
+
+
+def test_audit_humanized_invariance_blocks_distortion(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Invariance check passes when clean and blocks when humanizer introduces S1 distortion."""
+    from cathedra.agents.fact_checker import audit_humanized_invariance
+
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    ok = audit_humanized_invariance(
+        audited_markdown="O limite é 5%.",
+        humanized_markdown="Adota-se o limite de 5%.",
+        client=fake_llm_client,
+    )
+    assert ok.fact_check_passed is True
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="INV-1",
+                    quote="Adota-se o limite de 10%.",
+                    category="metric",
+                    verdict="false",
+                    severity="S1",
+                )
+            ]
+        )
+    )
+    blocked = audit_humanized_invariance(
+        audited_markdown="O limite é 5%.",
+        humanized_markdown="Adota-se o limite de 10%.",
+        client=fake_llm_client,
+    )
+    assert blocked.fact_check_passed is False
+
+
+def test_audit_lesson_draft_preserves_richer_first_result_if_repair_collapses(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Preserves full first audit if repair retry collapses to fewer items."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="A média é a soma sobre n.",
+                    category="technical",
+                    verdict="verified",
+                    evidence_kind="slide",
+                    evidence_locator=1,
+                    evidence_quote="A média é a soma sobre n.",
+                ),
+                ClaimAuditItem(
+                    claim_id="C02",
+                    quote="Trecho órfão não localizado.",
+                    category="technical",
+                    verdict="unsupported",
+                    severity="S4",
+                ),
+            ]
+        )
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="Outro trecho órfão.",
+                    category="technical",
+                    verdict="unsupported",
+                    severity="S4",
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text="A média é a soma sobre n. Outra frase.",
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+        max_repair_attempts=1,
+    )
+
+    assert result.fact_check_passed is False
+    assert len(result.audit_items) == 2
+
+
+def test_audit_lesson_draft_allow_pending_review_passes_non_critical(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """With allow_pending_review=True, non-critical S2/S4 pending items pass with flag."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="Trecho não localizado para remoção.",
+                    category="technical",
+                    verdict="unsupported",
+                    severity="S4",
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text="A média é a soma sobre n.",
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+        allow_pending_review=True,
+    )
+
+    assert result.fact_check_passed is True
+    assert result.has_pending_review is True
+
+
+def test_audit_lesson_draft_allow_pending_review_still_blocks_s1(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Critical S1/false errors without fix still block even with allow_pending_review=True."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="C01",
+                    quote="A média é sempre zero.",
+                    category="technical",
+                    verdict="false",
+                    severity="S1",
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text="A média é sempre zero.",
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+        allow_pending_review=True,
+    )
+
+    assert result.fact_check_passed is False
+    assert result.has_pending_review is False

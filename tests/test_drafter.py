@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.agents.drafter import (
+from cathedra.agents.drafter import (
     draft_node,
     format_drafter_user_prompt,
     generate_draft,
     get_drafter_prompt,
 )
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     AtomicZettel,
     DraftResult,
     LessonPipelineState,
@@ -239,7 +239,7 @@ def test_draft_node_propagates_cross_links_and_tensions(fake_llm_client: FakeLLM
     Raises:
         None.
     """
-    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+    from cathedra.schemas import CrossDisciplineLink, DialecticalTension
 
     syllabus = SyllabusModule(
         discipline_slug="operacoes",
@@ -380,7 +380,7 @@ def test_generate_draft_with_full_syllabus_and_tensions(fake_llm_client: FakeLLM
     Raises:
         None.
     """
-    from mba_wiki.schemas import CrossDisciplineLink, DialecticalTension
+    from cathedra.schemas import CrossDisciplineLink, DialecticalTension
 
     current_module = SyllabusModule(
         discipline_slug="marketing-estrategico",
@@ -462,7 +462,7 @@ def test_format_drafter_user_prompt_with_transcript() -> None:
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     syllabus = SyllabusModule(
         discipline_slug="gestao",
@@ -507,7 +507,7 @@ def test_draft_node_transmits_state_transcript(fake_llm_client: FakeLLMClient) -
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     syllabus = SyllabusModule(
         discipline_slug="gestao",

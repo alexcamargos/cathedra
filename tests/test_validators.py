@@ -4,7 +4,7 @@ Tests enforcement of typographic, punctuation, structural, and lexical blacklist
 rules specified in docs/LINTER_RULES.md.
 """
 
-from mba_wiki.agents.validators import (
+from cathedra.agents.validators import (
     LinterViolation,
     ValidationResult,
     mask_ignored_elements,
@@ -408,7 +408,7 @@ def test_sentence_split_handles_closing_quotes_and_parentheses() -> None:
     Raises:
         None.
     """
-    from mba_wiki.agents.validators import count_sentences
+    from cathedra.agents.validators import count_sentences
 
     text_with_quotes = (
         'O autor afirmou: "O VPL é a regra de ouro." '
