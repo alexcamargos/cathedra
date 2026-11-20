@@ -1,6 +1,6 @@
 # Regras Deterministicas do Linter Estilistico (Humanizer PT-BR)
 
-Este documento especifica os contratos e algoritmos que devem ser implementados em `src/mba_wiki/agents/validators.py` para inspecionar e validar textos em prosa gerados pelo pipeline antes da aprovacao e persistencia no cofre Obsidian.
+Este documento especifica os contratos e algoritmos que devem ser implementados em `src/cathedra/agents/validators.py` para inspecionar e validar textos em prosa gerados pelo pipeline antes da aprovacao e persistencia no cofre Obsidian.
 
 ---
 

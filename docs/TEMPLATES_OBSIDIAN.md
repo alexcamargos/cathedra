@@ -1,6 +1,6 @@
 # Templates e Marcadores de Idempotencia do Obsidian
 
-O modulo `src/mba_wiki/exporters/obsidian_writer.py` deve seguir estritamente estes formatos ao gerar ou atualizar arquivos no Vault. O exportador inclui suporte a auto-recuperacao de delimitadores estruturais caso sejam acidentalmente danificados durante edicoes manuais.
+O modulo `src/cathedra/exporters/obsidian_writer.py` deve seguir estritamente estes formatos ao gerar ou atualizar arquivos no Vault. O exportador inclui suporte a auto-recuperacao de delimitadores estruturais caso sejam acidentalmente danificados durante edicoes manuais.
 
 ---
 

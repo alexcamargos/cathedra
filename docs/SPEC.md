@@ -1,4 +1,4 @@
-# Especificacao Tecnica: MBA Wiki Engine
+# Especificacao Tecnica: Cathedra
 
 ## 1. Escopo e objetivo do sistema
 Ferramenta CLI em Python para geracao automatizada de uma Wiki academica no Obsidian a partir de tres insumos primarios:
