@@ -33,9 +33,11 @@ RE_PROTECTED_MARKDOWN = re.compile(
 
 # Common abbreviations and tokens that should not trigger sentence boundary splits
 RE_ABBREVIATIONS = re.compile(
-    r"\b(?:ex|i\.e|e\.g|dr|dra|prof|profa|et\s+al|vs|art|sr|sra|v\.g|p|pp|vol|cap|ed|seç|sec|n|no|fig)\.",
+    r"\b(?:ex|p\.ex|i\.e|e\.g|dr|dra|prof|profa|et\s+al|vs|art|sr|sra|v\.g|p|pp|vol|cap|ed|seç|sec|n|no|fig|etc|obs|s\.a|ltda|inc)\.",
     re.IGNORECASE,
 )
+RE_AUTHOR_INITIAL = re.compile(r"(?<![A-Za-zÀ-ÿ])[A-Z]\.(?=\s+[A-ZÀ-Ý])")
+RE_PLAIN_LIST_LINE = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 RE_DECIMAL_POINTS = re.compile(r"(?<=\d)\.(?=\d)")
 RE_ELLIPSES = re.compile(r"\.{3,}")
 
@@ -62,7 +64,7 @@ LEXICAL_BLACKLIST: list[tuple[str, str, list[str]]] = [
             r"\bo que realmente importa é\b",
             r"\bna essência\b",
             r"\bnão é apenas sobre\b",
-            r"\bmais do que\b",
+            r"\bmais do que\b[^.!?]{1,60}\b(?:trata-se de|é sobre|significa)\b",
         ],
     ),
     (
@@ -247,6 +249,7 @@ def count_sentences(paragraph: str) -> int:
         None.
     """
     cleaned = RE_ABBREVIATIONS.sub(" ABBR ", paragraph)
+    cleaned = RE_AUTHOR_INITIAL.sub(" INIT ", cleaned)
     cleaned = RE_DECIMAL_POINTS.sub(",", cleaned)
     cleaned = RE_ELLIPSES.sub(" ", cleaned)
 
@@ -360,9 +363,15 @@ def validate_markdown_prose(text: str) -> ValidationResult:
             continue
 
         lines = [line.strip() for line in raw_para.splitlines() if line.strip()]
-        # Skip if all lines are markdown headings (#), blockquotes (>), or table rows (|)
+        # Skip markdown headings (#), blockquotes (>), table rows (|), or plain list blocks
         if all(
-            (line.startswith("#") or line.startswith(">") or line.startswith("|")) for line in lines
+            (
+                line.startswith("#")
+                or line.startswith(">")
+                or line.startswith("|")
+                or RE_PLAIN_LIST_LINE.match(line) is not None
+            )
+            for line in lines
         ):
             continue
 

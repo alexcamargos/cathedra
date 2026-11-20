@@ -474,3 +474,59 @@ def test_normalized_zettel_exposes_hidden_r4_ai_bullet_violations() -> None:
     result = validate_markdown_prose(zettel.content_markdown)
     assert result.is_valid is False
     assert any(v.rule_id == "R4_AI_BULLET" for v in result.violations)
+
+
+def test_quantitative_mais_do_que_allowed_while_rhetorical_cliche_blocked() -> None:
+    """Tests that quantitative 'mais do que' passes while empty AI aphorism fails L2.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    quant_prose = (
+        "A amostra possui mais do que 30 observações válidas para aplicar o teorema central. "
+        "O modelo explicou mais do que 80% da variância dos preços observados."
+    )
+    quant_result = validate_markdown_prose(quant_prose)
+    assert quant_result.is_valid is True
+
+    cliche_prose = "Mais do que uma fórmula, trata-se de uma filosofia de gestão."
+    cliche_result = validate_markdown_prose(cliche_prose)
+    assert any(v.rule_id == "L2_EMPTY_APHORISM" for v in cliche_result.violations)
+
+
+def test_plain_lists_and_author_initials_do_not_trigger_r3_paragraph_length() -> None:
+    """Tests that plain markdown lists and author initials do not cause false R3 violations.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    plain_list = (
+        "- Item um da amostra.\n"
+        "- Item dois da amostra.\n"
+        "- Item três da amostra.\n"
+        "- Item quatro da amostra.\n"
+        "- Item cinco da amostra."
+    )
+    list_result = validate_markdown_prose(plain_list)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in list_result.violations)
+
+    initials_prose = (
+        "A Primeira Lei da Geografia de W. Tobler descreve dependência espacial (etc.). "
+        "Em seguida, L. Anselin formalizou os indicadores locais (obs. de aula). "
+        "M. Porter discutiu posicionamento competitivo em mercados industriais. "
+        "Por fim, R. Brealey analisou decisões de investimento corporativo."
+    )
+    initials_result = validate_markdown_prose(initials_prose)
+    assert not any(v.rule_id == "R3_PARAGRAPH_LENGTH" for v in initials_result.violations)
