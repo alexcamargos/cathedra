@@ -1331,3 +1331,308 @@ def test_bind_transcripts_cli_missing_syllabus_exits_with_error(
     )
     assert res.exit_code == 1
     assert "Ementa estruturada não encontrada" in res.output
+
+
+def test_build_discipline_processes_lessons_in_order_with_auto_transcript(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """Processes all numbered slides of a discipline in order and binds transcripts."""
+    from datetime import UTC, datetime
+    from shutil import copyfile
+
+    from mba_wiki.schemas import VideoTranscript
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="fundamentos-de-estatistica",
+                discipline_name="Fundamentos de Estatística",
+                syllabus_summary="Base estatística.",
+                topics=["Probabilidade", "Distribuições"],
+                bibliography=["Favero"],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    slides_dir = tmp_path / "slides"
+    disc_slides = slides_dir / "fundamentos-de-estatistica"
+    disc_slides.mkdir(parents=True)
+    copyfile(synthetic_cli_pdf, disc_slides / "02-Distribuicoes.pdf")
+    copyfile(synthetic_cli_pdf, disc_slides / "01-Conceitos.pdf")
+
+    transcripts_dir = tmp_path / "transcripts"
+    disc_transcripts = transcripts_dir / "fundamentos-de-estatistica"
+    disc_transcripts.mkdir(parents=True)
+    for num in (1, 2):
+        transcript = VideoTranscript(
+            source_filename=f"0{num}-Aula.mp4",
+            discipline_slug="fundamentos-de-estatistica",
+            lesson_number=num,
+            duration_seconds=120.0,
+            model_name="large-v3",
+            compute_type="int8_float16",
+            processed_at=datetime(2026, 11, 9, 2, 0, tzinfo=UTC),
+            full_text_raw=f"Texto aula {num}",
+            full_text_cleaned=f"Texto limpo aula {num}.",
+            segments=[],
+        )
+        (disc_transcripts / f"0{num}-Aula.json").write_text(
+            transcript.model_dump_json(indent=2), encoding="utf-8"
+        )
+
+    for num in (1, 2):
+        fake_llm_client.add_structured_response(
+            DraftResult(
+                raw_draft=f"Conteúdo da aula {num} sobre estatística.",
+                extracted_zettels=[],
+                cross_links=[],
+                detected_tensions=[],
+            )
+        )
+        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+        fake_llm_client.add_text_response(f"Conteúdo da aula {num} sobre estatística.")
+        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    res = cli_runner.invoke(
+        app,
+        [
+            "build-discipline",
+            "fundamentos-de-estatistica",
+            "--vault",
+            str(vault_dir),
+            "--slides-dir",
+            str(slides_dir),
+            "--transcripts-dir",
+            str(transcripts_dir),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    pos_1 = res.output.find("01-Conceitos.pdf")
+    pos_2 = res.output.find("02-Distribuicoes.pdf")
+    assert 0 <= pos_1 < pos_2
+    assert "Transcrição de fala vinculada: 01-Aula.json" in res.output
+    assert "Transcrição de fala vinculada: 02-Aula.json" in res.output
+
+
+def test_build_discipline_all_follows_syllabus_order(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """With --all, disciplines run in the exact order listed in ementa_estruturada.json."""
+    from shutil import copyfile
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="z-primeira-na-ementa",
+                discipline_name="Primeira na Ementa",
+                syllabus_summary="Resumo 1.",
+                topics=["T1"],
+                bibliography=["B1"],
+            ),
+            SyllabusModule(
+                discipline_slug="a-segunda-na-ementa",
+                discipline_name="Segunda na Ementa",
+                syllabus_summary="Resumo 2.",
+                topics=["T2"],
+                bibliography=["B2"],
+            ),
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    slides_dir = tmp_path / "slides"
+    for slug in ("z-primeira-na-ementa", "a-segunda-na-ementa"):
+        d = slides_dir / slug
+        d.mkdir(parents=True)
+        copyfile(synthetic_cli_pdf, d / f"01-{slug}.pdf")
+
+        fake_llm_client.add_structured_response(
+            DraftResult(
+                raw_draft=f"Resumo de {slug}.",
+                extracted_zettels=[],
+                cross_links=[],
+                detected_tensions=[],
+            )
+        )
+        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+        fake_llm_client.add_text_response(f"Resumo de {slug}.")
+        fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    res = cli_runner.invoke(
+        app,
+        [
+            "build-discipline",
+            "--all",
+            "--vault",
+            str(vault_dir),
+            "--slides-dir",
+            str(slides_dir),
+            "--transcripts-dir",
+            str(tmp_path / "empty_transcripts"),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    pos_first = res.output.find("01-z-primeira-na-ementa.pdf")
+    pos_second = res.output.find("01-a-segunda-na-ementa.pdf")
+    assert 0 <= pos_first < pos_second
+
+
+def test_build_discipline_stops_on_fact_check_block(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """Halts sequence immediately on FactCheckBlockedError and writes pending report."""
+    from shutil import copyfile
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="estatistica",
+                discipline_name="Estatística",
+                syllabus_summary="Resumo.",
+                topics=["T1"],
+                bibliography=["B1"],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    slides_dir = tmp_path / "slides"
+    disc_slides = slides_dir / "estatistica"
+    disc_slides.mkdir(parents=True)
+    copyfile(synthetic_cli_pdf, disc_slides / "01-Aula.pdf")
+    copyfile(synthetic_cli_pdf, disc_slides / "02-Aula.pdf")
+    copyfile(synthetic_cli_pdf, disc_slides / "03-Aula.pdf")
+
+    # Lesson 1 passes
+    fake_llm_client.add_structured_response(
+        DraftResult(
+            raw_draft="Texto aula 1.",
+            extracted_zettels=[],
+            cross_links=[],
+            detected_tensions=[],
+        )
+    )
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_text_response("Texto aula 1.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    # Lesson 2 fails fact-check with S1 contradicted claim
+    fake_llm_client.add_structured_response(
+        DraftResult(
+            raw_draft="Afirmação inventada.",
+            extracted_zettels=[],
+            cross_links=[],
+            detected_tensions=[],
+        )
+    )
+    fake_llm_client.add_structured_response(
+        AuditClaimsResponse(
+            claims=[
+                ClaimAuditItem(
+                    claim_id="CLM-001",
+                    quote="Afirmação inventada.",
+                    category="technical",
+                    verdict="false",
+                    severity="S1",
+                    evidence_source="Slide 1",
+                )
+            ]
+        )
+    )
+
+    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    res = cli_runner.invoke(
+        app,
+        [
+            "build-discipline",
+            "estatistica",
+            "--vault",
+            str(vault_dir),
+            "--slides-dir",
+            str(slides_dir),
+            "--transcripts-dir",
+            str(tmp_path / "empty_transcripts"),
+        ],
+    )
+    assert res.exit_code == 1
+    assert "01-Aula.pdf" in res.output
+    assert "02-Aula.pdf" in res.output
+    assert "03-Aula.pdf" not in res.output
+    assert "Relatório pendente" in res.output
+
+
+def test_build_discipline_rejects_duplicate_slide_numbers(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+) -> None:
+    """Rejects a discipline folder containing duplicate lesson number prefixes."""
+    from shutil import copyfile
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="estatistica",
+                discipline_name="Estatística",
+                syllabus_summary="Resumo.",
+                topics=["T1"],
+                bibliography=["B1"],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    slides_dir = tmp_path / "slides"
+    disc_slides = slides_dir / "estatistica"
+    disc_slides.mkdir(parents=True)
+    copyfile(synthetic_cli_pdf, disc_slides / "01-Parte-A.pdf")
+    copyfile(synthetic_cli_pdf, disc_slides / "01-Parte-B.pdf")
+
+    res = cli_runner.invoke(
+        app,
+        [
+            "build-discipline",
+            "estatistica",
+            "--vault",
+            str(vault_dir),
+            "--slides-dir",
+            str(slides_dir),
+        ],
+    )
+    assert res.exit_code == 1
+    assert "duplicad" in res.output.lower()

@@ -42,14 +42,19 @@ from mba_wiki.ingestion.syllabus_parser import (
     load_structured_syllabus,
     process_and_save_syllabus,
 )
-from mba_wiki.schemas import DialecticalTension, VideoTranscript
+from mba_wiki.schemas import (
+    DialecticalTension,
+    StructuredSyllabus,
+    SyllabusModule,
+    VideoTranscript,
+)
 from mba_wiki.transcription.batch_runner import (
     ProgressEvent,
     discover_lecture_videos,
     run_transcription_batch,
     validate_destination_collisions,
 )
-from mba_wiki.transcription.binder import bind_transcripts_to_syllabus
+from mba_wiki.transcription.binder import bind_transcripts_to_syllabus, extract_lesson_number
 from mba_wiki.transcription.telemetry import TranscriptionLogger
 from mba_wiki.transcription.transcriber import LectureTranscriber
 
@@ -337,13 +342,60 @@ def build_lesson(
         typer.echo(f"Erro ao carregar ementa: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    _execute_single_lesson(
+        slide_path=slide_path,
+        module=module,
+        lesson=lesson,
+        title=title,
+        slug=slug,
+        vault_root=vault_root,
+        structured_syllabus=structured_syllabus,
+        transcript=transcript,
+        transcripts_root=Path("data/raw/transcripts"),
+        force=force,
+    )
+
+
+def _execute_single_lesson(
+    *,
+    slide_path: Path,
+    module: SyllabusModule,
+    lesson: int,
+    title: str | None,
+    slug: str | None,
+    vault_root: Path,
+    structured_syllabus: StructuredSyllabus,
+    transcript: Path | None,
+    transcripts_root: Path,
+    force: bool,
+) -> None:
+    """Executes the full pipeline and vault export for a single lesson.
+
+    Args:
+        slide_path: Path to the lesson slide file (PDF or PPTX).
+        module: Matching SyllabusModule for the discipline.
+        lesson: Sequential lesson number.
+        title: Optional lesson title override.
+        slug: Optional lesson slug override.
+        vault_root: Target Obsidian Vault root directory.
+        structured_syllabus: Full StructuredSyllabus of the course.
+        transcript: Optional explicit transcript JSON path.
+        transcripts_root: Root directory used for automatic transcript lookup.
+        force: Whether to force delimiter recovery on existing vault pages.
+
+    Returns:
+        None.
+
+    Raises:
+        typer.Exit: With code 1 on factual block or pipeline error.
+    """
     try:
         resolved_slug = slug or (slugify(title) if title else None)
 
         resolved_transcript_path: Path | None = transcript
         if resolved_transcript_path is None:
             resolved_transcript_path, unidentified = find_auto_transcript(
-                discipline, lesson, Path("data/raw/transcripts")
+                module.discipline_slug, lesson, transcripts_root
             )
             if resolved_transcript_path is None:
                 typer.echo("Nenhuma transcrição identificada automaticamente para esta aula.")
@@ -405,6 +457,206 @@ def build_lesson(
     except Exception as exc:
         typer.echo(f"Erro durante o processamento da aula: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+def _discover_ordered_slides(discipline_dir: Path) -> list[tuple[int, Path]]:
+    """Discovers and sorts numbered slide presentations inside a discipline folder.
+
+    Args:
+        discipline_dir: Directory containing slides for a single discipline.
+
+    Returns:
+        Sorted list of (lesson_number, slide_path) tuples.
+
+    Raises:
+        ValueError: If duplicate lesson numbers are detected in the folder.
+    """
+    ordered: list[tuple[int, Path]] = []
+    seen_numbers: dict[int, Path] = {}
+    for item in sorted(discipline_dir.iterdir()):
+        if not item.is_file() or item.suffix.lower() not in {".pdf", ".pptx"}:
+            continue
+        lesson_num = extract_lesson_number(item.stem)
+        if lesson_num is None:
+            typer.echo(f"Aviso: slide sem prefixo numérico ignorado: {item.name}")
+            continue
+        if lesson_num in seen_numbers:
+            raise ValueError(
+                f"Numeração de aula duplicada ({lesson_num:02d}) em {discipline_dir}: "
+                f"{seen_numbers[lesson_num].name} e {item.name}"
+            )
+        seen_numbers[lesson_num] = item
+        ordered.append((lesson_num, item))
+    ordered.sort(key=lambda entry: (entry[0], entry[1].name))
+    return ordered
+
+
+@app.command(name="build-discipline")
+def build_discipline(
+    discipline: Annotated[
+        str | None,
+        typer.Argument(
+            help="Slug da disciplina na ementa (omitir quando usar --all).",
+        ),
+    ] = None,
+    all_disciplines: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Processa todas as disciplinas na ordem de ementa_estruturada.json.",
+        ),
+    ] = False,
+    slides_dir: Annotated[
+        Path,
+        typer.Option(
+            "--slides-dir",
+            help="Diretório raiz contendo as pastas de slides por disciplina.",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = Path("data/raw/slides"),
+    transcripts_dir: Annotated[
+        Path,
+        typer.Option(
+            "--transcripts-dir",
+            help="Diretório raiz das transcrições para vínculo automático.",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = Path("data/raw/transcripts"),
+    vault: Annotated[
+        Path | None,
+        typer.Option(
+            "--vault",
+            "-v",
+            help="Caminho do Obsidian Vault (sobrescreve configuração).",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    syllabus_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--syllabus-json",
+            help="Caminho explícito para ementa_estruturada.json.",
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Força reprocessamento de arquivos e recuperação de delimitadores.",
+        ),
+    ] = False,
+) -> None:
+    """Processa em sequência todas as aulas de uma disciplina ou de toda a ementa.
+
+    Args:
+        discipline: Slug da disciplina alvo (ou None quando --all for informado).
+        all_disciplines: Quando True, executa todas as disciplinas na ordem da ementa.
+        slides_dir: Diretório raiz dos slides organizados por disciplina.
+        transcripts_dir: Diretório raiz das transcrições em JSON.
+        vault: Caminho opcional do Vault do Obsidian.
+        syllabus_json: Caminho explícito para ementa_estruturada.json.
+        force: Força recuperação de delimitadores HTML no cofre.
+
+    Returns:
+        None.
+
+    Raises:
+        typer.Exit: Com código 1 em parâmetros inválidos, colisões ou bloqueio factual.
+    """
+    if (discipline is None and not all_disciplines) or (discipline is not None and all_disciplines):
+        typer.echo(
+            "Erro: informe o slug de uma disciplina OU use --all (nunca ambos).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    settings = get_settings()
+    vault_root = vault or settings.obsidian_vault_path
+    vault_root.mkdir(parents=True, exist_ok=True)
+    target_syllabus_json = syllabus_json or (
+        vault_root / "00_Programa_Curso" / "ementa_estruturada.json"
+    )
+    if not target_syllabus_json.is_file():
+        typer.echo(
+            f"Erro: Ementa estruturada não encontrada em {target_syllabus_json}. "
+            "Execute 'init-syllabus' primeiro.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not slides_dir.is_dir():
+        typer.echo(f"Erro: Diretório de slides não encontrado: {slides_dir}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        structured_syllabus = load_structured_syllabus(target_syllabus_json)
+        target_modules = (
+            list(structured_syllabus.modules)
+            if all_disciplines
+            else [find_syllabus_module(structured_syllabus, discipline or "")]
+        )
+    except KeyError as err:
+        typer.echo(f"Erro: Disciplina '{discipline}' não encontrada na ementa.", err=True)
+        raise typer.Exit(code=1) from err
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Erro ao carregar ementa: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    processed_lessons = 0
+    for module in target_modules:
+        disc_slides_dir = slides_dir / module.discipline_slug
+        if not disc_slides_dir.is_dir():
+            if not all_disciplines:
+                typer.echo(
+                    f"Erro: Pasta de slides não encontrada para '{module.discipline_slug}': "
+                    f"{disc_slides_dir}",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            typer.echo(f"Aviso: pasta de slides ausente para '{module.discipline_slug}'; pulando.")
+            continue
+
+        try:
+            ordered_slides = _discover_ordered_slides(disc_slides_dir)
+        except ValueError as exc:
+            typer.echo(f"Erro: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        if not ordered_slides:
+            if not all_disciplines:
+                typer.echo(
+                    f"Erro: Nenhum slide numerado encontrado em {disc_slides_dir}.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            typer.echo(f"Aviso: nenhum slide numerado em '{module.discipline_slug}'; pulando.")
+            continue
+
+        typer.echo(
+            f"\n=== Processando disciplina: {module.discipline_name} ({module.discipline_slug}) ==="
+        )
+        for lesson_num, slide_path in ordered_slides:
+            typer.echo(f"\n[{module.discipline_slug}] Aula {lesson_num:02d}: {slide_path.name}")
+            _execute_single_lesson(
+                slide_path=slide_path,
+                module=module,
+                lesson=lesson_num,
+                title=None,
+                slug=None,
+                vault_root=vault_root,
+                structured_syllabus=structured_syllabus,
+                transcript=None,
+                transcripts_root=transcripts_dir,
+                force=force,
+            )
+            processed_lessons += 1
+
+    typer.echo(f"\nSequência concluída: {processed_lessons} aula(s) processada(s).")
 
 
 def parse_tension_note(note_path: Path) -> DialecticalTension:
