@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     AtomicZettel,
     DialecticalTension,
     LessonAuditReport,
@@ -216,6 +216,28 @@ def format_zettels_section(zettels: list[AtomicZettel]) -> str:
     return "\n".join(lines)
 
 
+def format_pending_review_callout(output: WikiLessonOutput) -> str:
+    """Formats an Obsidian warning callout when a lesson has pending factual review items."""
+    if not output.has_pending_review:
+        return ""
+    pending_items = [
+        item
+        for item in output.audit_items
+        if item.evidence_status == "pending_review" or item.verdict != "verified"
+    ]
+    lines = [
+        "> [!warning] Revisão Factual Pendente",
+        "> Esta aula foi exportada com pendências de verificação literal na fonte. "
+        "Consulte o relatório em `03_Auditoria_Factual/`.",
+    ]
+    for item in pending_items[:5]:
+        snippet = " ".join(item.quote.split())
+        if len(snippet) > 120:
+            snippet = snippet[:117] + "..."
+        lines.append(f"> - `{item.claim_id}` ({item.verdict}): {snippet}")
+    return "\n".join(lines)
+
+
 def write_lesson_page(
     vault_root: Path,
     output: WikiLessonOutput,
@@ -243,9 +265,14 @@ def write_lesson_page(
     lesson_path = discipline_dir / filename
 
     zettel_block = format_zettels_section(output.extracted_zettels)
+    pending_callout = format_pending_review_callout(output)
     auto_body = output.body_markdown.strip()
+    if pending_callout:
+        auto_body = f"{pending_callout}\n\n{auto_body}"
     if zettel_block:
         auto_body = f"{auto_body}\n\n{zettel_block}"
+
+    fact_check_status = "pending_review" if output.has_pending_review else "verified"
 
     if not lesson_path.is_file():
         content = (
@@ -259,6 +286,7 @@ def write_lesson_page(
             f"processed_date: {output.processed_date.isoformat()}\n"
             f'source_slide: "{escape_yaml_str(output.source_slide_filename)}"\n'
             f"fact_check_passed: {str(output.fact_check_passed).lower()}\n"
+            f"fact_check_status: {fact_check_status}\n"
             f"removed_claims: {output.removed_unsupported_claims}\n"
             "tags:\n"
             "  - mba/aula\n"
