@@ -253,3 +253,10 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Implementar o comando `build-discipline` em `src/mba_wiki/cli.py` para processar todas as aulas de uma disciplina (ou todas as disciplinas na ordem exata de `ementa_estruturada.json` via `--all`), descobrindo slides ordenados por numero de aula, vinculando automaticamente as transcricoes ja normalizadas e interrompendo com seguranca diante de bloqueios factuais (`FactCheckBlockedError`).
 - **Arquivos afetados:** `src/mba_wiki/cli.py`, `tests/test_cli.py`, `docs/SPEC.md`, `README.md`.
 - **Criterio de aceite:** Testes com `CliRunner` e mocks comprovando a ordenacao pela ementa/numero de aula, vinculo automatico de transcricoes e interrupcao segura em bloqueio factual passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+
+## Etapa 41: Alinhamento de lastro exclusivo (Slides + Transcricao) entre Drafter e Fact-Checker
+- **Status:** `[x]`
+- **Escopo:** Remover a injecao de `syllabus.bibliography` do prompt do Drafter em `src/mba_wiki/agents/drafter.py` e atualizar `src/mba_wiki/agents/prompts/drafter.md` para proibir citacoes a obras da bibliografia e exemplos externos nao presentes nos slides ou na transcricao da aula (mantendo a ementa apenas para escopo e `cross_links`). Reforcar em `src/mba_wiki/agents/prompts/fact_checker.md` e `src/mba_wiki/agents/fact_checker.py` que a auditoria factual usa exclusivamente os slides e a transcricao como lastro, exigindo trechos `quote` literais e contiguos para remocao deterministica de `S4`.
+- **Arquivos afetados:** `src/mba_wiki/agents/drafter.py`, `src/mba_wiki/agents/prompts/drafter.md`, `src/mba_wiki/agents/fact_checker.py`, `src/mba_wiki/agents/prompts/fact_checker.md`, `tests/test_drafter.py`, `tests/test_fact_checker.py`, `tests/test_graph.py`.
+- **Criterio de aceite:** Testes unitarios validando ausencia de `bibliography` no prompt do Drafter, preservacao de lastro exclusivo em slides/transcricao e remocao deterministica de `S4` passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
