@@ -1232,3 +1232,102 @@ def test_build_lesson_with_explicit_transcript(
         assert "Transcrição Vinculada: aula_01_financas.mp4" in result.stdout
     finally:
         set_client_override(None)
+
+
+def test_bind_transcripts_cli_dry_run_and_apply(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """Tests bind-transcripts CLI in dry-run mode and real update mode."""
+    from datetime import UTC, datetime
+
+    from mba_wiki.schemas import VideoTranscript
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="fundamentos-de-estatistica",
+                discipline_name="Fundamentos de Estatística",
+                syllabus_summary="Base estatística.",
+                topics=["Probabilidade"],
+                bibliography=["Favero"],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    transcripts_dir = tmp_path / "transcripts"
+    disc_dir = transcripts_dir / "fundamentos-de-estatistica"
+    disc_dir.mkdir(parents=True)
+    json_path = disc_dir / "01-Fundamentos-de-Estatistica-I.json"
+    transcript = VideoTranscript(
+        source_filename="01-Fundamentos-de-Estatistica-I.mp4",
+        discipline_slug="módulo-01-fundamentos",
+        lesson_number=None,
+        duration_seconds=120.0,
+        model_name="large-v3",
+        compute_type="int8_float16",
+        processed_at=datetime(2026, 11, 9, 2, 0, tzinfo=UTC),
+        full_text_raw="texto",
+        full_text_cleaned="texto",
+        segments=[],
+    )
+    json_path.write_text(transcript.model_dump_json(indent=2), encoding="utf-8")
+
+    dry_res = cli_runner.invoke(
+        app,
+        [
+            "bind-transcripts",
+            "--vault",
+            str(vault_dir),
+            "--transcripts-dir",
+            str(transcripts_dir),
+            "--dry-run",
+        ],
+    )
+    assert dry_res.exit_code == 0, dry_res.output
+    assert "Simulação (dry-run)" in dry_res.output
+    assert "Atualizados (previstos): 1" in dry_res.output
+    before = VideoTranscript.model_validate_json(json_path.read_text(encoding="utf-8"))
+    assert before.lesson_number is None
+
+    apply_res = cli_runner.invoke(
+        app,
+        [
+            "bind-transcripts",
+            "--vault",
+            str(vault_dir),
+            "--transcripts-dir",
+            str(transcripts_dir),
+        ],
+    )
+    assert apply_res.exit_code == 0, apply_res.output
+    assert "Vinculação concluída" in apply_res.output
+    assert "Atualizados: 1" in apply_res.output
+    after = VideoTranscript.model_validate_json(json_path.read_text(encoding="utf-8"))
+    assert after.discipline_slug == "fundamentos-de-estatistica"
+    assert after.lesson_number == 1
+
+
+def test_bind_transcripts_cli_missing_syllabus_exits_with_error(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """Fails cleanly when ementa_estruturada.json does not exist."""
+    res = cli_runner.invoke(
+        app,
+        [
+            "bind-transcripts",
+            "--vault",
+            str(tmp_path / "empty_vault"),
+            "--transcripts-dir",
+            str(tmp_path),
+        ],
+    )
+    assert res.exit_code == 1
+    assert "Ementa estruturada não encontrada" in res.output

@@ -49,6 +49,7 @@ from mba_wiki.transcription.batch_runner import (
     run_transcription_batch,
     validate_destination_collisions,
 )
+from mba_wiki.transcription.binder import bind_transcripts_to_syllabus
 from mba_wiki.transcription.telemetry import TranscriptionLogger
 from mba_wiki.transcription.transcriber import LectureTranscriber
 
@@ -762,3 +763,136 @@ def transcribe_batch(
     except Exception as exc:
         typer.echo(f"Erro fatal na execução do lote de transcrição: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+@app.command(name="bind-transcripts")
+def bind_transcripts(
+    vault: Annotated[
+        Path | None,
+        typer.Option(
+            "--vault",
+            "-v",
+            help="Caminho base do Obsidian Vault (sobrescreve configuração padrão).",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    syllabus_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--syllabus-json",
+            help="Caminho explícito para ementa_estruturada.json.",
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    transcripts_dir: Annotated[
+        Path,
+        typer.Option(
+            "--transcripts-dir",
+            help="Diretório raiz das transcrições em JSON.",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = Path("data/raw/transcripts"),
+    slides_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--slides-dir",
+            help="Diretório raiz dos slides para validação cruzada de aulas.",
+            file_okay=False,
+            resolve_path=True,
+        ),
+    ] = Path("data/raw/slides"),
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Simula a vinculação e exibe o relatório sem alterar os arquivos JSON.",
+        ),
+    ] = False,
+) -> None:
+    """Vincula transcrições JSON existentes aos slugs da ementa e números de aula.
+
+    Args:
+        vault: Caminho opcional do Vault do Obsidian.
+        syllabus_json: Caminho explícito para ementa_estruturada.json.
+        transcripts_dir: Diretório raiz contendo as subpastas de transcrições.
+        slides_dir: Diretório opcional de slides para conferência cruzada.
+        dry_run: Quando True, apenas simula as alterações sem gravar em disco.
+
+    Returns:
+        None.
+
+    Raises:
+        typer.Exit: Com código 1 se a ementa ou diretório de transcrições não existir.
+    """
+    settings = get_settings()
+    vault_root = vault or settings.obsidian_vault_path
+    target_syllabus_json = syllabus_json or (
+        vault_root / "00_Programa_Curso" / "ementa_estruturada.json"
+    )
+    if not target_syllabus_json.is_file():
+        typer.echo(
+            f"Erro: Ementa estruturada não encontrada em {target_syllabus_json}. "
+            "Execute 'init-syllabus' primeiro.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if not transcripts_dir.is_dir():
+        typer.echo(
+            f"Erro: Diretório de transcrições não encontrado: {transcripts_dir}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    resolved_slides = slides_dir if slides_dir is not None and slides_dir.is_dir() else None
+
+    try:
+        structured_syllabus = load_structured_syllabus(target_syllabus_json)
+        summary = bind_transcripts_to_syllabus(
+            syllabus=structured_syllabus,
+            transcripts_dir=transcripts_dir,
+            slides_dir=resolved_slides,
+            dry_run=dry_run,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Erro ao vincular transcrições: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    mode_label = "Simulação (dry-run)" if dry_run else "Vinculação concluída"
+    typer.echo(f"--- {mode_label} ---")
+    typer.echo(f"Arquivos inspecionados: {summary.total_files_scanned}")
+    typer.echo(f"Atualizados{' (previstos)' if dry_run else ''}: {len(summary.updated_files)}")
+    typer.echo(f"Já vinculados corretamente: {summary.already_bound_count}")
+
+    if summary.updated_files:
+        for item in summary.updated_files:
+            typer.echo(
+                f"  - {item.file_path.name}: "
+                f"{item.previous_discipline_slug} -> {item.discipline_slug} | "
+                f"aula {item.lesson_number:02d}"
+            )
+    if summary.unmatched_folders:
+        typer.echo(
+            f"Pastas fora da ementa ({len(summary.unmatched_folders)}): "
+            + ", ".join(summary.unmatched_folders)
+        )
+    if summary.unnumbered_files:
+        typer.echo(
+            f"Arquivos sem prefixo numérico ({len(summary.unnumbered_files)}): "
+            + ", ".join(summary.unnumbered_files)
+        )
+    if summary.ambiguous_files:
+        typer.echo(
+            f"Arquivos com numeração ambígua ({len(summary.ambiguous_files)}): "
+            + ", ".join(summary.ambiguous_files)
+        )
+    if summary.invalid_files:
+        typer.echo(
+            f"Arquivos inválidos ({len(summary.invalid_files)}): "
+            + ", ".join(summary.invalid_files)
+        )
+    for warning in summary.warnings:
+        typer.echo(f"Aviso: {warning}")
