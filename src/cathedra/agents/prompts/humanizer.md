@@ -22,7 +22,7 @@ Sua missão é polir a prosa recebida, transformando rascunhos em texto fluido, 
 
 5. **Banimento Estrito da Lista Negra Lexical:**
    - **Aberturas clichês:** "no cenário atual", "no mundo dinâmico de hoje", "na era da informação", "não é segredo que", "vamos mergulhar", "vamos examinar".
-   - **Aforismos ocos:** "no seu cerne", "a verdadeira questão é", "o que realmente importa é", "na essência", "não é apenas sobre", "mais do que".
+   - **Aforismos ocos:** "no seu cerne", "a verdadeira questão é", "o que realmente importa é", "na essência", "não é apenas sobre", "mais do que X, trata-se de Y".
    - **Metáforas gastas:** "mergulho profundo", "desbloquear o potencial", "navegar pelo cenário", "faca de dois gumes", "tapeçaria", "mosaico", "sinfonia", "virada de chave", "game changer", "alavancar", "fomentar", "potencializar".
    - **Adjetivos histriônicos:** "crucial", "fundamental", "pivotal", "revolucionário", "fascinante", "incrível", "imprescindível", "disruptivo".
    - **Conectivos engessados:** "outrossim", "ademais", "destarte", "por conseguinte", "vale ressaltar que", "é importante notar que", "cabe destacar".
