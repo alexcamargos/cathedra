@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.transcription.telemetry import (
+from cathedra.transcription.telemetry import (
     BatchExecutionReport,
     TranscriptionLogger,
     TranscriptionTelemetryItem,

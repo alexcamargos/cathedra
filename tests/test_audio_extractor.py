@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from mba_wiki.transcription.audio_extractor import extract_audio_to_file, extracted_audio
+from cathedra.transcription.audio_extractor import extract_audio_to_file, extracted_audio
 
 
 def test_extracted_audio_success(tmp_path: Path, mocker: MockerFixture) -> None:
@@ -30,7 +30,7 @@ def test_extracted_audio_success(tmp_path: Path, mocker: MockerFixture) -> None:
     fake_video.write_bytes(b"dummy video content")
 
     mocker.patch(
-        "mba_wiki.transcription.audio_extractor.ensure_ffmpeg",
+        "cathedra.transcription.audio_extractor.ensure_ffmpeg",
         return_value=Path("C:\\tools\\ffmpeg.exe"),
     )
 
@@ -100,7 +100,7 @@ def test_extracted_audio_ffmpeg_error(tmp_path: Path, mocker: MockerFixture) -> 
     fake_video.write_bytes(b"corrupted bytes")
 
     mocker.patch(
-        "mba_wiki.transcription.audio_extractor.ensure_ffmpeg",
+        "cathedra.transcription.audio_extractor.ensure_ffmpeg",
         return_value=Path("C:\\tools\\ffmpeg.exe"),
     )
     mocker.patch(
@@ -137,7 +137,7 @@ def test_extract_audio_to_file_success(tmp_path: Path, mocker: MockerFixture) ->
     target_wav = tmp_path / "output_custom.wav"
 
     mocker.patch(
-        "mba_wiki.transcription.audio_extractor.ensure_ffmpeg",
+        "cathedra.transcription.audio_extractor.ensure_ffmpeg",
         return_value=Path("C:\\tools\\ffmpeg.exe"),
     )
 

@@ -3,13 +3,13 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     StructuredSyllabus,
     SyllabusModule,
     TranscriptCheckpoint,
     VideoTranscript,
 )
-from mba_wiki.transcription.binder import bind_transcripts_to_syllabus
+from cathedra.transcription.binder import bind_transcripts_to_syllabus
 
 
 def _make_syllabus() -> StructuredSyllabus:

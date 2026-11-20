@@ -11,7 +11,7 @@ from typing import Any
 
 from pytest_mock import MockerFixture
 
-from mba_wiki.transcription.transcriber import LectureTranscriber
+from cathedra.transcription.transcriber import LectureTranscriber
 
 
 @dataclass
@@ -45,13 +45,13 @@ def test_transcriber_initialization_defaults(mocker: MockerFixture) -> None:
         None.
     """
     mocker.patch(
-        "mba_wiki.transcription.transcriber.prepare_runtime_environment",
+        "cathedra.transcription.transcriber.prepare_runtime_environment",
         return_value={
             "device": "cuda",
             "compute_type": "int8_float16",
         },
     )
-    mock_model_cls = mocker.patch("mba_wiki.transcription.transcriber.WhisperModel")
+    mock_model_cls = mocker.patch("cathedra.transcription.transcriber.WhisperModel")
 
     transcriber = LectureTranscriber()
     assert transcriber.model_size == "large-v3"
@@ -77,7 +77,7 @@ def test_transcriber_initialization_custom(mocker: MockerFixture) -> None:
     Raises:
         None.
     """
-    mock_model_cls = mocker.patch("mba_wiki.transcription.transcriber.WhisperModel")
+    mock_model_cls = mocker.patch("cathedra.transcription.transcriber.WhisperModel")
 
     transcriber = LectureTranscriber(
         model_size="medium",
@@ -134,7 +134,7 @@ def test_transcribe_file_success(tmp_path: Path, mocker: MockerFixture) -> None:
 
     mock_instance = mocker.MagicMock()
     mock_instance.transcribe.side_effect = fake_transcribe
-    mocker.patch("mba_wiki.transcription.transcriber.WhisperModel", return_value=mock_instance)
+    mocker.patch("cathedra.transcription.transcriber.WhisperModel", return_value=mock_instance)
 
     transcriber = LectureTranscriber(device="cpu", compute_type="int8")
     result = transcriber.transcribe_file(

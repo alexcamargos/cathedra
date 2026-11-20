@@ -9,14 +9,14 @@ from typing import cast
 
 import pytest
 
-from mba_wiki.schemas import VideoTranscript
-from mba_wiki.transcription.batch_runner import (
+from cathedra.schemas import VideoTranscript
+from cathedra.transcription.batch_runner import (
     BatchRunSummary,
     ProgressEvent,
     run_transcription_batch,
 )
-from mba_wiki.transcription.telemetry import TranscriptionLogger
-from mba_wiki.transcription.transcriber import LectureTranscriber
+from cathedra.transcription.telemetry import TranscriptionLogger
+from cathedra.transcription.transcriber import LectureTranscriber
 
 
 class FakeTranscriber:
@@ -56,7 +56,7 @@ def setup_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     def fake_extraction(path: Path) -> Iterator[Path]:
         yield wav
 
-    monkeypatch.setattr("mba_wiki.transcription.batch_runner.extracted_audio", fake_extraction)
+    monkeypatch.setattr("cathedra.transcription.batch_runner.extracted_audio", fake_extraction)
     return videos, output, source
 
 
@@ -129,7 +129,7 @@ def test_changed_identity_reprocesses_with_preserved_previous_json(
     elif change == "compute":
         client.compute_type = "int8_float16"
     else:
-        monkeypatch.setattr("mba_wiki.transcription.batch_runner.version", lambda _: "new-version")
+        monkeypatch.setattr("cathedra.transcription.batch_runner.version", lambda _: "new-version")
     events: list[ProgressEvent] = []
     result = run_batch(tmp_path, videos, output, client, events=events)
     assert result.videos_processed == 1
@@ -312,7 +312,7 @@ def test_failed_replacement_keeps_original_and_backup(
             raise OSError("Falha simulada na substituição")
         original_replace(src, dst)
 
-    monkeypatch.setattr("mba_wiki.transcription.batch_runner.os.replace", fail_transcript_replace)
+    monkeypatch.setattr("cathedra.transcription.batch_runner.os.replace", fail_transcript_replace)
     result = run_batch(tmp_path, videos, output, client, force=True)
     assert result.failed_videos
     assert target.read_bytes() == previous
@@ -322,7 +322,7 @@ def test_failed_replacement_keeps_original_and_backup(
 
 
 def test_legacy_migration_rejects_colliding_videos_without_moving_json(tmp_path: Path) -> None:
-    from mba_wiki.transcription.batch_runner import migrate_legacy_transcripts
+    from cathedra.transcription.batch_runner import migrate_legacy_transcripts
 
     videos = tmp_path / "videos" / "marketing"
     videos.mkdir(parents=True)

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from mba_wiki.transcription.bootstrap import (
+from cathedra.transcription.bootstrap import (
     check_cuda_support,
     ensure_ffmpeg,
     prepare_runtime_environment,
@@ -130,11 +130,11 @@ def test_prepare_runtime_environment(mocker: MockerFixture) -> None:
         None.
     """
     mocker.patch(
-        "mba_wiki.transcription.bootstrap.ensure_ffmpeg",
+        "cathedra.transcription.bootstrap.ensure_ffmpeg",
         return_value=Path("C:\\bin\\ffmpeg.exe"),
     )
     mocker.patch(
-        "mba_wiki.transcription.bootstrap.check_cuda_support",
+        "cathedra.transcription.bootstrap.check_cuda_support",
         return_value=(True, "CUDA operacional"),
     )
 

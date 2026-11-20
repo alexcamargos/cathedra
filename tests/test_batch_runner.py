@@ -13,15 +13,15 @@ from pathlib import Path
 
 from pytest_mock import MockerFixture
 
-from mba_wiki.schemas import TranscriptCheckpoint, TranscriptSegment, VideoTranscript
-from mba_wiki.transcription.batch_runner import (
+from cathedra.schemas import TranscriptCheckpoint, TranscriptSegment, VideoTranscript
+from cathedra.transcription.batch_runner import (
     ProgressEvent,
     discover_lecture_videos,
     migrate_legacy_transcripts,
     run_transcription_batch,
 )
-from mba_wiki.transcription.telemetry import TranscriptionLogger
-from mba_wiki.transcription.transcriber import (
+from cathedra.transcription.telemetry import TranscriptionLogger
+from cathedra.transcription.transcriber import (
     TRANSCRIPTION_BEAM_SIZE,
     TRANSCRIPTION_LANGUAGE,
     TRANSCRIPTION_PIPELINE_REVISION,
@@ -146,7 +146,7 @@ def test_run_transcription_batch_checkpoint_and_resume(
                 temp_wav.unlink()
 
     mocker.patch(
-        "mba_wiki.transcription.batch_runner.extracted_audio",
+        "cathedra.transcription.batch_runner.extracted_audio",
         side_effect=fake_extracted_audio,
     )
 
@@ -269,7 +269,7 @@ def test_run_transcription_batch_failure_tolerance(tmp_path: Path, mocker: Mocke
     video.write_bytes(b"corrupted")
 
     mocker.patch(
-        "mba_wiki.transcription.batch_runner.extracted_audio",
+        "cathedra.transcription.batch_runner.extracted_audio",
         side_effect=RuntimeError("FFmpeg erro fatal"),
     )
 

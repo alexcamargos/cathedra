@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mba_wiki.agents.graph import ingestion_node
-from mba_wiki.cli import app
-from mba_wiki.schemas import (
+from cathedra.agents.graph import ingestion_node
+from cathedra.cli import app
+from cathedra.schemas import (
     AuditClaimsResponse,
     ClaimAuditItem,
     DraftResult,
@@ -74,7 +74,7 @@ def environment(
     syllabus.parent.mkdir(parents=True)
     syllabus.write_text(StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8")
     mocker.patch(
-        "mba_wiki.agents.graph.parse_slides",
+        "cathedra.agents.graph.parse_slides",
         return_value=[SlideChunk(slide_number=1, title="Aula", raw_text="Aula gravada.")],
     )
     client = FakeLLMClient(
@@ -85,7 +85,7 @@ def environment(
         ],
         text_responses=["Conteúdo da aula."],
     )
-    mocker.patch("mba_wiki.cli.get_client", return_value=client)
+    mocker.patch("cathedra.cli.get_client", return_value=client)
     return slide, vault, client
 
 
@@ -232,7 +232,7 @@ def test_blocked_audit_records_transcript_provenance(
             ),
         ]
     )
-    mocker.patch("mba_wiki.cli.get_client", return_value=client)
+    mocker.patch("cathedra.cli.get_client", return_value=client)
     result = invoke(slide, vault, "--transcript", str(path))
     assert result.exit_code != 0
     report_path = vault / "03_Auditoria_Factual" / "pendentes" / "financas_Aula_01_audit.json"

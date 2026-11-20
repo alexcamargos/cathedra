@@ -4,8 +4,8 @@ Validates deterministic removal of speech fillers, hesitations, repetitive stutt
 and colloquial discourse markers while strictly preserving domain-specific terminology.
 """
 
-from mba_wiki.schemas import TranscriptSegment
-from mba_wiki.transcription.cleaner import clean_segments, clean_speech_text
+from cathedra.schemas import TranscriptSegment
+from cathedra.transcription.cleaner import clean_segments, clean_speech_text
 
 
 def test_clean_speech_hesitations() -> None:
