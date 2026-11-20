@@ -13,8 +13,8 @@ import pytest
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mba_wiki.cli import app, get_client, set_client_override
-from mba_wiki.schemas import (
+from cathedra.cli import app, get_client, set_client_override
+from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
@@ -71,7 +71,7 @@ def synthetic_cli_pdf(tmp_path: Path) -> Path:
 
 
 def test_cli_help(cli_runner: CliRunner) -> None:
-    """Tests that mba-wiki displays the help message and registered commands.
+    """Tests that cathedra displays the help message and registered commands.
 
     Args:
         cli_runner: CliRunner test fixture.
@@ -137,7 +137,7 @@ def test_init_syllabus_success(
         bibliography=["Livro de Finanças"],
     )
     fake_llm_client.add_structured_response(StructuredSyllabus(modules=[module]))
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
     result = cli_runner.invoke(
         app,
@@ -344,7 +344,7 @@ def test_build_lesson_full_success(
     fake_llm_client.add_text_response(clean_prose)
     fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
     result = cli_runner.invoke(
         app,
@@ -425,7 +425,7 @@ def test_build_lesson_saves_blocked_audit_without_changing_published_files(
             ]
         )
     )
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
     result = cli_runner.invoke(
         app,
@@ -494,7 +494,7 @@ def test_build_lesson_saves_final_audit_blocker(
             ]
         )
     )
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
     result = cli_runner.invoke(
         app,
@@ -541,20 +541,21 @@ def test_build_lesson_rejects_verified_claim_without_located_evidence(
         StructuredSyllabus(modules=[module]).model_dump_json(), encoding="utf-8"
     )
     fake_llm_client.add_structured_response(DraftResult(raw_draft="A taxa é 20%."))
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
-                    claim_id="C1",
-                    quote="A taxa é 20%.",
-                    category="metric",
-                    verdict="verified",
-                    evidence_source="Livro de Finanças",
-                )
-            ]
-        )
+    ungrounded = AuditClaimsResponse(
+        claims=[
+            ClaimAuditItem(
+                claim_id="C1",
+                quote="Trecho externo não localizado no rascunho.",
+                category="metric",
+                verdict="unsupported",
+                severity="S4",
+                evidence_source="Livro de Finanças",
+            )
+        ]
     )
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    fake_llm_client.add_structured_response(ungrounded)
+    fake_llm_client.add_structured_response(ungrounded)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
 
     result = cli_runner.invoke(
         app,
@@ -575,7 +576,7 @@ def test_build_lesson_rejects_verified_claim_without_located_evidence(
     pending = vault / "03_Auditoria_Factual" / "pendentes" / "financas_Aula_01_audit.json"
     report = LessonAuditReport.model_validate_json(pending.read_text(encoding="utf-8"))
     assert report.audit_items[0].evidence_status == "pending_review"
-    assert report.audit_items[0].evidence_source is None
+    assert report.audit_items[0].verdict == "unsupported"
 
 
 def test_get_client_override(fake_llm_client: FakeLLMClient) -> None:
@@ -610,11 +611,11 @@ def test_get_client_from_settings(mocker: MockerFixture) -> None:
         None.
     """
     mock_client = mocker.MagicMock()
-    mocker.patch("mba_wiki.cli.create_llm_client", return_value=mock_client)
+    mocker.patch("cathedra.cli.create_llm_client", return_value=mock_client)
     mock_settings = mocker.MagicMock()
     mock_settings.gemini_api_key = "fake_key"
     mock_settings.llm_model_drafter = "gemini-2.5-pro"
-    mocker.patch("mba_wiki.cli.get_settings", return_value=mock_settings)
+    mocker.patch("cathedra.cli.get_settings", return_value=mock_settings)
 
     client = get_client()
     assert client is mock_client
@@ -640,7 +641,7 @@ def test_build_lesson_exports_dialectical_tensions(
     Raises:
         None.
     """
-    from mba_wiki.schemas import DialecticalTension
+    from cathedra.schemas import DialecticalTension
 
     vault_dir = tmp_path / "vault_tensions"
     vault_dir.mkdir(parents=True, exist_ok=True)
@@ -796,8 +797,8 @@ def test_get_client_model_routing_drafter_and_auditor(mocker: MockerFixture) -> 
     Raises:
         None.
     """
-    mock_create = mocker.patch("mba_wiki.cli.create_llm_client")
-    mock_settings = mocker.patch("mba_wiki.cli.get_settings")
+    mock_create = mocker.patch("cathedra.cli.create_llm_client")
+    mock_settings = mocker.patch("cathedra.cli.get_settings")
     mock_settings.return_value.gemini_api_key = "dummy-key"
     mock_settings.return_value.llm_backend = "gemini_rest"
     mock_settings.return_value.llm_model_drafter = "gemini-2.5-flash"
@@ -974,7 +975,7 @@ def test_transcribe_batch_success(
     Raises:
         None.
     """
-    from mba_wiki.transcription.batch_runner import BatchRunSummary
+    from cathedra.transcription.batch_runner import BatchRunSummary
 
     mock_summary = BatchRunSummary(
         total_videos_found=5,
@@ -986,11 +987,11 @@ def test_transcribe_batch_success(
     )
 
     mocker.patch(
-        "mba_wiki.cli.LectureTranscriber",
+        "cathedra.cli.LectureTranscriber",
         return_value=mocker.MagicMock(),
     )
     mock_run = mocker.patch(
-        "mba_wiki.cli.run_transcription_batch",
+        "cathedra.cli.run_transcription_batch",
         return_value=mock_summary,
     )
 
@@ -1022,7 +1023,7 @@ def test_transcribe_batch_with_options(
     Raises:
         None.
     """
-    from mba_wiki.transcription.batch_runner import BatchRunSummary
+    from cathedra.transcription.batch_runner import BatchRunSummary
 
     mock_summary = BatchRunSummary(
         total_videos_found=1,
@@ -1034,11 +1035,11 @@ def test_transcribe_batch_with_options(
     )
 
     mock_transcriber_cls = mocker.patch(
-        "mba_wiki.cli.LectureTranscriber",
+        "cathedra.cli.LectureTranscriber",
         return_value=mocker.MagicMock(),
     )
     mock_run = mocker.patch(
-        "mba_wiki.cli.run_transcription_batch",
+        "cathedra.cli.run_transcription_batch",
         return_value=mock_summary,
     )
 
@@ -1076,7 +1077,7 @@ def test_transcribe_batch_rejects_collision_before_initializing_model(
     (videos / "aula.mp4").write_bytes(b"video 1")
     (videos / "aula.mkv").write_bytes(b"video 2")
     output = tmp_path / "output"
-    transcriber = mocker.patch("mba_wiki.cli.LectureTranscriber")
+    transcriber = mocker.patch("cathedra.cli.LectureTranscriber")
     result = cli_runner.invoke(
         app, ["transcribe-batch", str(videos.parent), "--output-dir", str(output), "--force"]
     )
@@ -1091,13 +1092,13 @@ def test_transcribe_batch_reports_unverified_files_as_pending(
     tmp_path: Path,
     mocker: MockerFixture,
 ) -> None:
-    from mba_wiki.transcription.batch_runner import BatchRunSummary
+    from cathedra.transcription.batch_runner import BatchRunSummary
 
     videos = tmp_path / "videos"
     videos.mkdir()
-    mocker.patch("mba_wiki.cli.LectureTranscriber", return_value=mocker.MagicMock())
+    mocker.patch("cathedra.cli.LectureTranscriber", return_value=mocker.MagicMock())
     mocker.patch(
-        "mba_wiki.cli.run_transcription_batch",
+        "cathedra.cli.run_transcription_batch",
         return_value=BatchRunSummary(total_videos_found=1, videos_unverified=1),
     )
     result = cli_runner.invoke(app, ["transcribe-batch", str(videos)])
@@ -1111,12 +1112,12 @@ def test_transcribe_batch_reports_previous_copy_path(
     tmp_path: Path,
     mocker: MockerFixture,
 ) -> None:
-    from mba_wiki.transcription.batch_runner import BatchRunSummary, DiscoveredVideo, ProgressEvent
+    from cathedra.transcription.batch_runner import BatchRunSummary, DiscoveredVideo, ProgressEvent
 
     videos = tmp_path / "videos"
     videos.mkdir()
     backup = tmp_path / "transcripts" / ".history" / "financas" / "aula.backup.json"
-    mocker.patch("mba_wiki.cli.LectureTranscriber", return_value=mocker.MagicMock())
+    mocker.patch("cathedra.cli.LectureTranscriber", return_value=mocker.MagicMock())
 
     def run_fake(**kwargs: Any) -> BatchRunSummary:
         callback = kwargs["progress_callback"]
@@ -1131,7 +1132,7 @@ def test_transcribe_batch_reports_previous_copy_path(
         )
         return BatchRunSummary(total_videos_found=1, videos_processed=1)
 
-    mocker.patch("mba_wiki.cli.run_transcription_batch", side_effect=run_fake)
+    mocker.patch("cathedra.cli.run_transcription_batch", side_effect=run_fake)
     result = cli_runner.invoke(app, ["transcribe-batch", str(videos)])
     assert result.exit_code == 0
     assert "Copia anterior:" in result.output
@@ -1160,7 +1161,7 @@ def test_build_lesson_with_explicit_transcript(
     """
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     vault_dir = tmp_path / "vault"
     prog_dir = vault_dir / "00_Programa_Curso"
@@ -1241,7 +1242,7 @@ def test_bind_transcripts_cli_dry_run_and_apply(
     """Tests bind-transcripts CLI in dry-run mode and real update mode."""
     from datetime import UTC, datetime
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     vault_dir = tmp_path / "vault"
     prog_dir = vault_dir / "00_Programa_Curso"
@@ -1344,7 +1345,7 @@ def test_build_discipline_processes_lessons_in_order_with_auto_transcript(
     from datetime import UTC, datetime
     from shutil import copyfile
 
-    from mba_wiki.schemas import VideoTranscript
+    from cathedra.schemas import VideoTranscript
 
     vault_dir = tmp_path / "vault"
     prog_dir = vault_dir / "00_Programa_Curso"
@@ -1403,7 +1404,7 @@ def test_build_discipline_processes_lessons_in_order_with_auto_transcript(
         fake_llm_client.add_text_response(f"Conteúdo da aula {num} sobre estatística.")
         fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
     res = cli_runner.invoke(
         app,
         [
@@ -1478,7 +1479,7 @@ def test_build_discipline_all_follows_syllabus_order(
         fake_llm_client.add_text_response(f"Resumo de {slug}.")
         fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
 
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
     res = cli_runner.invoke(
         app,
         [
@@ -1570,7 +1571,7 @@ def test_build_discipline_stops_on_fact_check_block(
         )
     )
 
-    mocker.patch("mba_wiki.cli.get_client", return_value=fake_llm_client)
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
     res = cli_runner.invoke(
         app,
         [
@@ -1636,3 +1637,87 @@ def test_build_discipline_rejects_duplicate_slide_numbers(
     )
     assert res.exit_code == 1
     assert "duplicad" in res.output.lower()
+
+
+def test_build_discipline_allow_pending_review_continues_sequence(
+    cli_runner: CliRunner,
+    synthetic_cli_pdf: Path,
+    tmp_path: Path,
+    fake_llm_client: FakeLLMClient,
+    mocker: MockerFixture,
+) -> None:
+    """With --allow-pending-review, ungrounded verified items publish with warning and continue."""
+    from shutil import copyfile
+
+    vault_dir = tmp_path / "vault"
+    prog_dir = vault_dir / "00_Programa_Curso"
+    prog_dir.mkdir(parents=True)
+    syllabus = StructuredSyllabus(
+        modules=[
+            SyllabusModule(
+                discipline_slug="estatistica",
+                discipline_name="Estatística",
+                syllabus_summary="Resumo.",
+                topics=["T1"],
+                bibliography=["B1"],
+            )
+        ]
+    )
+    (prog_dir / "ementa_estruturada.json").write_text(
+        syllabus.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    slides_dir = tmp_path / "slides"
+    disc_slides = slides_dir / "estatistica"
+    disc_slides.mkdir(parents=True)
+    copyfile(synthetic_cli_pdf, disc_slides / "01-Aula.pdf")
+    copyfile(synthetic_cli_pdf, disc_slides / "02-Aula.pdf")
+
+    # Lesson 1: verified without locator (triggers repair once, then proceeds as pending_review)
+    fake_llm_client.add_structured_response(
+        DraftResult(raw_draft="Texto aula 1.", extracted_zettels=[])
+    )
+    ungrounded = AuditClaimsResponse(
+        claims=[
+            ClaimAuditItem(
+                claim_id="C01",
+                quote="Trecho não localizado.",
+                category="technical",
+                verdict="unsupported",
+                severity="S4",
+            )
+        ]
+    )
+    fake_llm_client.add_structured_response(ungrounded)
+    fake_llm_client.add_structured_response(ungrounded)
+    fake_llm_client.add_text_response("Texto aula 1.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    # Lesson 2: clean
+    fake_llm_client.add_structured_response(
+        DraftResult(raw_draft="Texto aula 2.", extracted_zettels=[])
+    )
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+    fake_llm_client.add_text_response("Texto aula 2.")
+    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[]))
+
+    mocker.patch("cathedra.cli.get_client", return_value=fake_llm_client)
+    res = cli_runner.invoke(
+        app,
+        [
+            "build-discipline",
+            "estatistica",
+            "--vault",
+            str(vault_dir),
+            "--slides-dir",
+            str(slides_dir),
+            "--transcripts-dir",
+            str(tmp_path / "empty_transcripts"),
+            "--allow-pending-review",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "pending_review" in res.output
+    assert "01-Aula.pdf" in res.output
+    assert "02-Aula.pdf" in res.output
+    assert "Sequência concluída: 2 aula(s) processada(s)." in res.output

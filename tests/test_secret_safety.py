@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mba_wiki.agents.llm_client import GeminiRESTClient
-from mba_wiki.cli import app
-from mba_wiki.config import Settings
+from cathedra.agents.llm_client import GeminiRESTClient
+from cathedra.cli import app
+from cathedra.config import Settings
 
 FAKE_SECRET = "fake-test-secret-never-real"
 
@@ -29,7 +29,7 @@ def install_mock_transport(
     real_client = httpx.Client
     transport = httpx.MockTransport(handler)
     mocker.patch(
-        "mba_wiki.agents.llm_client.httpx.Client",
+        "cathedra.agents.llm_client.httpx.Client",
         side_effect=lambda **kwargs: real_client(transport=transport, **kwargs),
     )
 
@@ -192,8 +192,8 @@ def test_cli_error_does_not_expose_credential(
 
     install_mock_transport(mocker, handle)
     settings = Settings(_env_file=None, llm_backend="gemini", gemini_api_key=FAKE_SECRET)
-    mocker.patch("mba_wiki.cli.get_settings", return_value=settings)
-    mocker.patch("mba_wiki.agents.llm_client.time.sleep")
+    mocker.patch("cathedra.cli.get_settings", return_value=settings)
+    mocker.patch("cathedra.agents.llm_client.time.sleep")
     source = tmp_path / "ementa.txt"
     source.write_text("Ementa fictícia", encoding="utf-8")
     result = CliRunner().invoke(

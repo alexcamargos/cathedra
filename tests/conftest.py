@@ -12,8 +12,8 @@ from typing import Any, TypeVar, cast
 import pytest
 from pydantic import BaseModel
 
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.schemas import SlideChunk, SyllabusModule
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.schemas import SlideChunk, SyllabusModule
 
 T = TypeVar("T", bound=BaseModel)
 

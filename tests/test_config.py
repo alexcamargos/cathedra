@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.config import Settings, get_settings
+from cathedra.config import Settings, get_settings
 
 
 def test_default_settings(monkeypatch: pytest.MonkeyPatch) -> None:

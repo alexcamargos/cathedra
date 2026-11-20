@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 import pytest
 from pydantic import ValidationError
 
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
