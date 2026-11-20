@@ -1,4 +1,4 @@
-"""Configuration management module for MBA Wiki Engine.
+"""Configuration management module for Cathedra.
 
 Loads environment variables, vault paths, and API keys using pydantic-settings.
 """
@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application configuration settings for the MBA Wiki Engine.
+    """Application configuration settings for the Cathedra.
 
     Attributes:
         obsidian_vault_path: Root filesystem path to the Obsidian vault.

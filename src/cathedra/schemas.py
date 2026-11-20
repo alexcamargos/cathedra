@@ -1,4 +1,4 @@
-"""Data contracts and Pydantic v2 schemas for the MBA Wiki Engine.
+"""Data contracts and Pydantic v2 schemas for the Cathedra.
 
 Defines schemas for course syllabi, slide chunks, factual auditing, atomic
 zettels, wiki lessons, and the end-to-end pipeline state machine.
@@ -192,6 +192,7 @@ class FactCheckResult(BaseModel):
 
     audit_items: list[ClaimAuditItem] = Field(default_factory=list)
     fact_check_passed: bool
+    has_pending_review: bool = False
     removed_unsupported_claims: int = 0
     audited_markdown: str
     validated_zettels: list[AtomicZettel] = Field(default_factory=list)
@@ -248,6 +249,7 @@ class WikiLessonOutput(BaseModel):
     source_transcript_path: str | None = None
     source_transcript_binding: Literal["explicit", "auto", "in_memory"] | None = None
     fact_check_passed: bool
+    has_pending_review: bool = False
     removed_unsupported_claims: int
     body_markdown: str
     extracted_zettels: list[AtomicZettel]
@@ -411,6 +413,7 @@ class LessonPipelineState(BaseModel):
     extracted_zettels: list[AtomicZettel] = Field(default_factory=list)
     audit_items: list[ClaimAuditItem] = Field(default_factory=list)
     fact_check_passed: bool = False
+    has_pending_review: bool = False
     removed_unsupported_claims: int = 0
     audited_markdown: str | None = None
     humanized_markdown: str | None = None

@@ -1,4 +1,4 @@
-"""MBA Wiki Engine package.
+"""Cathedra package.
 
 Automated academic wiki generator for Obsidian with factual audit and style linting.
 """
