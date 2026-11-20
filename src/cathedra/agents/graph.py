@@ -9,12 +9,12 @@ import unicodedata
 from datetime import date
 from pathlib import Path
 
-from mba_wiki.agents.drafter import draft_node
-from mba_wiki.agents.fact_checker import audit_lesson_draft, fact_check_node
-from mba_wiki.agents.humanizer import humanize_node
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.ingestion.slide_parser import infer_slide_title, parse_slides
-from mba_wiki.schemas import (
+from cathedra.agents.drafter import draft_node
+from cathedra.agents.fact_checker import audit_humanized_invariance, fact_check_node
+from cathedra.agents.humanizer import humanize_node
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.ingestion.slide_parser import infer_slide_title, parse_slides
+from cathedra.schemas import (
     LessonPipelineState,
     SlideChunk,
     StructuredSyllabus,
@@ -221,6 +221,7 @@ def finalize_output_node(
         source_transcript_path=state.source_transcript_path,
         source_transcript_binding=state.source_transcript_binding,
         fact_check_passed=state.fact_check_passed,
+        has_pending_review=state.has_pending_review,
         removed_unsupported_claims=state.removed_unsupported_claims,
         body_markdown=final_body,
         extracted_zettels=state.extracted_zettels,
@@ -238,6 +239,7 @@ def execute_pipeline(
     auditor_client: StructuredLLMClient | None = None,
     processed_date: date | None = None,
     humanizer_max_attempts: int = 3,
+    allow_pending_review: bool = False,
 ) -> LessonPipelineState:
     """Executes the full linear pipeline graph across drafting, auditing, and humanizing.
 
@@ -262,7 +264,11 @@ def execute_pipeline(
     state = draft_node(state=state, client=client)
 
     # 2. Auditoria Factual Adversarial
-    state = fact_check_node(state=state, client=auditor_client or client)
+    state = fact_check_node(
+        state=state,
+        client=auditor_client or client,
+        allow_pending_review=allow_pending_review,
+    )
     state.audit_items = [
         item.model_copy(update={"audit_stage": "draft"}) for item in state.audit_items
     ]
@@ -272,25 +278,29 @@ def execute_pipeline(
     # 3. Polimento Estilístico com Validação e Retentativa
     state = humanize_node(state=state, client=client, max_attempts=humanizer_max_attempts)
 
-    # 4. Audit the exact post-humanizer artifacts, without mutating them.
+    # 4. Audit the exact post-humanizer artifacts via invariance check against audited prose.
     state.fact_check_passed = False
-    final_audit = audit_lesson_draft(
-        draft_text=state.humanized_markdown or "",
-        slides=state.slides,
-        syllabus=state.syllabus,
+    final_audit = audit_humanized_invariance(
+        audited_markdown=state.audited_markdown or "",
+        humanized_markdown=state.humanized_markdown or "",
         client=auditor_client or client,
         zettels=[zettel.model_copy(deep=True) for zettel in state.extracted_zettels],
         tensions=[tension.model_copy(deep=True) for tension in state.detected_tensions],
-        transcript=state.transcript,
+        allow_pending_review=allow_pending_review,
     )
     state.audit_items.extend(
         item.model_copy(update={"audit_stage": "final"}) for item in final_audit.audit_items
     )
-    if not final_audit.fact_check_passed or any(
-        item.verdict != "verified" or item.severity is not None for item in final_audit.audit_items
+    if not final_audit.fact_check_passed or (
+        not allow_pending_review
+        and any(
+            item.verdict != "verified" or (item.severity is not None and item.severity != "S6")
+            for item in final_audit.audit_items
+        )
     ):
         raise FactCheckBlockedError(state)
     state.fact_check_passed = True
+    state.has_pending_review = state.has_pending_review or final_audit.has_pending_review
 
     # 5. Finalização e Construção do Contrato de Saída
     state = finalize_output_node(state=state, processed_date=processed_date)
@@ -304,6 +314,7 @@ def run_lesson_pipeline(
     auditor_client: StructuredLLMClient | None = None,
     processed_date: date | None = None,
     humanizer_max_attempts: int = 3,
+    allow_pending_review: bool = False,
 ) -> WikiLessonOutput:
     """Executes the pipeline graph and returns the finalized WikiLessonOutput.
 
@@ -327,6 +338,7 @@ def run_lesson_pipeline(
         auditor_client=auditor_client,
         processed_date=processed_date,
         humanizer_max_attempts=humanizer_max_attempts,
+        allow_pending_review=allow_pending_review,
     )
     if final_state.output is None:
         raise RuntimeError("Pipeline completed execution but failed to produce WikiLessonOutput.")

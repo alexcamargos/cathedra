@@ -7,8 +7,8 @@ candidate universal concepts as AtomicZettel notes for the Zettelkasten.
 
 from pathlib import Path
 
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.schemas import (
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.schemas import (
     DraftResult,
     LessonPipelineState,
     SlideChunk,

@@ -1,19 +1,19 @@
 """Pipeline agents and validation logic package."""
 
-from mba_wiki.agents.drafter import (
+from cathedra.agents.drafter import (
     draft_node,
     format_drafter_user_prompt,
     generate_draft,
     get_drafter_prompt,
 )
-from mba_wiki.agents.fact_checker import (
+from cathedra.agents.fact_checker import (
     apply_audit_remediations,
     audit_lesson_draft,
     fact_check_node,
     format_fact_checker_user_prompt,
     get_fact_checker_prompt,
 )
-from mba_wiki.agents.graph import (
+from cathedra.agents.graph import (
     create_initial_state,
     execute_pipeline,
     finalize_output_node,
@@ -22,15 +22,15 @@ from mba_wiki.agents.graph import (
     run_lesson_pipeline,
     slugify,
 )
-from mba_wiki.agents.humanizer import (
+from cathedra.agents.humanizer import (
     HumanizerValidationError,
     format_remediation_feedback,
     get_humanizer_prompt,
     humanize_node,
     humanize_text,
 )
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.agents.validators import (
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.agents.validators import (
     LinterViolation,
     ValidationResult,
     mask_ignored_elements,

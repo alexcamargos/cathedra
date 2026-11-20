@@ -8,8 +8,8 @@ unsupported (S4) claims, applies factual fixes, and updates pipeline state.
 import re
 from pathlib import Path
 
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.schemas import (
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.schemas import (
     AtomicZettel,
     AuditClaimsResponse,
     ClaimAuditItem,
@@ -22,6 +22,7 @@ from mba_wiki.schemas import (
 )
 
 DEFAULT_FACT_CHECKER_PROMPT_PATH = Path(__file__).parent / "prompts" / "fact_checker.md"
+DEFAULT_INVARIANCE_PROMPT_PATH = Path(__file__).parent / "prompts" / "fact_checker_invariance.md"
 
 
 def get_fact_checker_prompt(prompt_path: Path | None = None) -> str:
@@ -40,6 +41,25 @@ def get_fact_checker_prompt(prompt_path: Path | None = None) -> str:
     resolved_path = prompt_path or DEFAULT_FACT_CHECKER_PROMPT_PATH
     if not resolved_path.is_file():
         raise FileNotFoundError(f"Fact checker system prompt file not found: {resolved_path}")
+    return resolved_path.read_text(encoding="utf-8")
+
+
+def get_invariance_prompt(prompt_path: Path | None = None) -> str:
+    """Loads the post-humanizer invariance audit prompt from an external markdown file.
+
+    Args:
+        prompt_path: Optional explicit path to invariance prompt file.
+            Defaults to DEFAULT_INVARIANCE_PROMPT_PATH.
+
+    Returns:
+        String content of the invariance prompt markdown file.
+
+    Raises:
+        FileNotFoundError: If the specified prompt file cannot be found on disk.
+    """
+    resolved_path = prompt_path or DEFAULT_INVARIANCE_PROMPT_PATH
+    if not resolved_path.is_file():
+        raise FileNotFoundError(f"Invariance audit prompt file not found: {resolved_path}")
     return resolved_path.read_text(encoding="utf-8")
 
 
@@ -95,19 +115,16 @@ def format_fact_checker_user_prompt(
     # 3. Speech Transcript (if present)
     if transcript:
         duration_min = transcript.duration_seconds / 60
-        transcript_parts: list[str] = [
+        header = (
             f"## Fonte 3: Transcrição da Fala do Professor na Videoaula\n"
             f"Duração gravada: {duration_min:.1f} minutos | "
-            f"Arquivo de origem: `{transcript.source_filename}`\n\n"
-            f"{transcript.full_text_cleaned}"
-        ]
-        for segment in transcript.segments:
-            transcript_parts.append(
-                f"### Segmento {segment.id} ({segment.start:.1f}s–{segment.end:.1f}s)\n"
-                f"Transcrição bruta: {segment.text_raw}\n"
-                f"Transcrição limpa: {segment.text_cleaned}"
-            )
-        sections.append("\n\n".join(transcript_parts))
+            f"Arquivo de origem: `{transcript.source_filename}`"
+        )
+        if transcript.segments:
+            segment_lines = [f"[{seg.id}] {seg.text_cleaned}" for seg in transcript.segments]
+            sections.append(f"{header}\n\n" + "\n".join(segment_lines))
+        else:
+            sections.append(f"{header}\n\n{transcript.full_text_cleaned}")
 
     # 4. Draft Text to Audit
     draft_sec = f"## Rascunho da Aula a ser Auditado\n\n```markdown\n{draft_text}\n```"
@@ -305,6 +322,18 @@ def apply_audit_remediations(
                 has_unresolved_blockers = True
             continue
 
+        # Minor stylistic notes (S6) are non-blocking unless verdict is false/unsupported/misleading
+        if item.severity == "S6" and item.verdict not in ("false", "unsupported", "misleading"):
+            if item.proposed_fix:
+                new_text, matched = locate_and_apply_remediation(
+                    text=audited_text,
+                    quote=item.quote,
+                    replacement=item.proposed_fix,
+                )
+                if matched:
+                    audited_text = new_text
+            continue
+
         # Check for false, imprecise, or misleading claims
         if item.verdict in ("false", "imprecise", "misleading") or item.severity in (
             "S1",
@@ -456,62 +485,44 @@ def filter_and_remediate_tensions(
     return validated, removed_count, has_blockers
 
 
-def audit_lesson_draft(
+def _has_unresolved_critical_claims(
+    claims: list[ClaimAuditItem],
+    draft_text: str,
+    audited_markdown: str,
+) -> bool:
+    """Checks whether any critical S1/S5/false claim remained unresolved after remediation."""
+    for item in claims:
+        if item.verdict != "false" and item.severity not in ("S1", "S5"):
+            continue
+        if not item.proposed_fix:
+            return True
+        _, still_in_draft = locate_and_apply_remediation(audited_markdown, item.quote)
+        _, was_in_draft = locate_and_apply_remediation(draft_text, item.quote)
+        if was_in_draft and still_in_draft:
+            return True
+    return False
+
+
+def _evaluate_audit_claims(
+    response: AuditClaimsResponse,
     draft_text: str,
     slides: list[SlideChunk],
     syllabus: SyllabusModule,
-    client: StructuredLLMClient,
-    prompt: str | None = None,
-    zettels: list[AtomicZettel] | None = None,
-    tensions: list[DialecticalTension] | None = None,
-    transcript: VideoTranscript | None = None,
-) -> FactCheckResult:
-    """Performs adversarial factual audit on lesson draft text using StructuredLLMClient.
-
-    Args:
-        draft_text: Lesson draft prose to audit.
-        slides: Primary source slide chunks.
-        syllabus: Anchoring syllabus module.
-        client: Implementation conforming to StructuredLLMClient protocol.
-        prompt: Optional system prompt override. Defaults to loaded prompt.
-        zettels: Optional candidate atomic zettels to audit.
-        tensions: Optional candidate dialectical tensions to audit.
-        transcript: Optional consolidated speech transcript of the recorded lecture.
-
-    Returns:
-        FactCheckResult containing audit items, status, remediated text, and validated collections.
-
-    Raises:
-        Exception: If LLM call or schema validation fails.
-    """
-    system_prompt = prompt or get_fact_checker_prompt()
-    user_prompt = format_fact_checker_user_prompt(
-        draft_text=draft_text,
-        slides=slides,
-        syllabus=syllabus,
-        zettels=zettels,
-        tensions=tensions,
-        transcript=transcript,
-    )
-
-    response: AuditClaimsResponse = client.generate_structured(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_model=AuditClaimsResponse,
-    )
-
-    evidence_blockers = False
+    zettels: list[AtomicZettel] | None,
+    tensions: list[DialecticalTension] | None,
+    transcript: VideoTranscript | None,
+    allow_pending_review: bool = False,
+) -> tuple[FactCheckResult, list[str]]:
+    """Evaluates raw auditor claims deterministically and identifies repairable slips."""
+    repair_reasons: list[str] = []
     for item in response.claims:
         item.evidence_status = "pending_review"
         if item.verdict == "verified":
             source = locate_evidence_source(item, slides, syllabus, transcript)
             item.evidence_source = source
-            if source is None:
-                evidence_blockers = True
-            else:
+            if source is not None:
                 item.evidence_status = "material_supported"
 
-    # 1. Segregate claims matching raw_draft vs secondary artifacts
     draft_claims: list[ClaimAuditItem] = []
     has_orphan_blockers = False
 
@@ -521,7 +532,6 @@ def audit_lesson_draft(
             draft_claims.append(item)
             continue
 
-        # Check if the claim belongs to candidate zettels or tensions
         matched_in_secondary = False
         for z in zettels or []:
             _, m_c = locate_and_apply_remediation(z.content_markdown, item.quote)
@@ -541,11 +551,18 @@ def audit_lesson_draft(
                     matched_in_secondary = True
                     break
 
-        if not matched_in_secondary and (
+        is_blocking_item = (
+            item.severity != "S6" or item.verdict in ("false", "unsupported", "misleading")
+        ) and (
             item.verdict in ("unsupported", "false", "misleading", "imprecise")
             or item.severity in ("S1", "S2", "S3", "S4", "S5")
-        ):
+        )
+        if not matched_in_secondary and is_blocking_item:
             has_orphan_blockers = True
+            repair_reasons.append(
+                f"{item.claim_id}: quote não localizado literalmente no rascunho "
+                "nem em Zettels/tensões."
+            )
 
     audited_markdown, removed_count_draft, draft_passed = apply_audit_remediations(
         raw_text=draft_text,
@@ -571,27 +588,196 @@ def audit_lesson_draft(
         )
 
     total_removed = removed_count_draft + removed_count_zettels + removed_count_tensions
-    overall_passed = (
-        draft_passed
-        and not zettels_blockers
-        and not tensions_blockers
-        and not has_orphan_blockers
-        and not evidence_blockers
+    strict_passed = (
+        draft_passed and not zettels_blockers and not tensions_blockers and not has_orphan_blockers
     )
+    has_critical = _has_unresolved_critical_claims(
+        claims=draft_claims,
+        draft_text=draft_text,
+        audited_markdown=audited_markdown,
+    )
+    if allow_pending_review and not strict_passed and not has_critical:
+        overall_passed = True
+        has_pending_review = True
+    else:
+        overall_passed = strict_passed
+        has_pending_review = False
 
-    return FactCheckResult(
+    result = FactCheckResult(
         audit_items=list(response.claims),
         fact_check_passed=overall_passed,
+        has_pending_review=has_pending_review,
         removed_unsupported_claims=total_removed,
         audited_markdown=audited_markdown,
         validated_zettels=valid_zettels,
         validated_tensions=valid_tensions,
+    )
+    return result, repair_reasons
+
+
+def audit_lesson_draft(
+    draft_text: str,
+    slides: list[SlideChunk],
+    syllabus: SyllabusModule,
+    client: StructuredLLMClient,
+    prompt: str | None = None,
+    zettels: list[AtomicZettel] | None = None,
+    tensions: list[DialecticalTension] | None = None,
+    transcript: VideoTranscript | None = None,
+    max_repair_attempts: int = 0,
+    allow_pending_review: bool = False,
+) -> FactCheckResult:
+    """Performs adversarial factual audit on lesson draft text using StructuredLLMClient.
+
+    Args:
+        draft_text: Lesson draft prose to audit.
+        slides: Primary source slide chunks.
+        syllabus: Anchoring syllabus module.
+        client: Implementation conforming to StructuredLLMClient protocol.
+        prompt: Optional system prompt override. Defaults to loaded prompt.
+        zettels: Optional candidate atomic zettels to audit.
+        tensions: Optional candidate dialectical tensions to audit.
+        transcript: Optional consolidated speech transcript of the recorded lecture.
+        max_repair_attempts: Optional repair retries when evidence locators or quotes fail.
+
+    Returns:
+        FactCheckResult containing audit items, status, remediated text, and validated collections.
+
+    Raises:
+        Exception: If LLM call or schema validation fails.
+    """
+    system_prompt = prompt or get_fact_checker_prompt()
+    base_user_prompt = format_fact_checker_user_prompt(
+        draft_text=draft_text,
+        slides=slides,
+        syllabus=syllabus,
+        zettels=zettels,
+        tensions=tensions,
+        transcript=transcript,
+    )
+
+    current_prompt = base_user_prompt
+    best_result: FactCheckResult | None = None
+    for attempt in range(max_repair_attempts + 1):
+        response: AuditClaimsResponse = client.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=current_prompt,
+            response_model=AuditClaimsResponse,
+        )
+        result, repair_reasons = _evaluate_audit_claims(
+            response=response,
+            draft_text=draft_text,
+            slides=slides,
+            syllabus=syllabus,
+            zettels=zettels,
+            tensions=tensions,
+            transcript=transcript,
+            allow_pending_review=allow_pending_review,
+        )
+        if (
+            best_result is None
+            or (result.fact_check_passed and not result.has_pending_review)
+            or (result.fact_check_passed and not best_result.fact_check_passed)
+            or (
+                len(result.audit_items) >= len(best_result.audit_items)
+                and result.fact_check_passed == best_result.fact_check_passed
+            )
+        ):
+            best_result = result
+        if (
+            (result.fact_check_passed and not result.has_pending_review)
+            or not repair_reasons
+            or attempt >= max_repair_attempts
+        ):
+            return best_result
+        repair_notes = "\n".join(f"- {reason}" for reason in repair_reasons)
+        current_prompt = (
+            f"{base_user_prompt}\n\n"
+            "## Reparo Obrigatório da Auditoria Anterior\n"
+            "Corrija exclusivamente as falhas estruturais abaixo na resposta JSON:\n"
+            f"{repair_notes}\n"
+            "Para todo item 'verified', informe evidence_kind, evidence_locator e evidence_quote "
+            "literal da fonte. Para todo item reprovado, extraia em quote o trecho literal exato "
+            "e contíguo do texto auditado."
+        )
+
+    assert best_result is not None
+    return best_result
+
+
+def audit_humanized_invariance(
+    audited_markdown: str,
+    humanized_markdown: str,
+    client: StructuredLLMClient,
+    zettels: list[AtomicZettel] | None = None,
+    tensions: list[DialecticalTension] | None = None,
+    prompt: str | None = None,
+    allow_pending_review: bool = False,
+) -> FactCheckResult:
+    """Verifies that post-humanizer text preserves factual invariance against audited prose.
+
+    Args:
+        audited_markdown: Previously verified and remediated lesson prose.
+        humanized_markdown: Stylistically rewritten prose produced by humanize_node.
+        client: Structured LLM client for invariance verification.
+        zettels: Validated atomic zettels to include in final invariance check.
+        tensions: Validated dialectical tensions to include in final invariance check.
+        prompt: Optional system prompt override.
+
+    Returns:
+        FactCheckResult recording invariance audit items and pass/fail status.
+
+    Raises:
+        Exception: If LLM call or schema validation fails.
+    """
+    system_prompt = prompt or get_invariance_prompt()
+    sections = [
+        f"## Texto Auditado (Referência Aprovada)\n\n```markdown\n{audited_markdown}\n```",
+        f"## Texto Humanizado (Alvo da Verificação)\n\n```markdown\n{humanized_markdown}\n```",
+    ]
+    if zettels:
+        z_lines = [f"- [{z.slug}] {z.title}: {z.content_markdown}" for z in zettels]
+        sections.append("## Zettels Finais\n" + "\n".join(z_lines))
+    if tensions:
+        t_lines = [
+            f"- [{t.slug}] {t.title}: {t.pole_a_thesis} vs {t.pole_b_thesis}" for t in tensions
+        ]
+        sections.append("## Tensões Finais\n" + "\n".join(t_lines))
+
+    response: AuditClaimsResponse = client.generate_structured(
+        system_prompt=system_prompt,
+        user_prompt="\n\n".join(sections),
+        response_model=AuditClaimsResponse,
+    )
+    has_blocking = any(
+        item.verdict != "verified" or (item.severity is not None and item.severity != "S6")
+        for item in response.claims
+    )
+    has_critical = any(
+        item.verdict == "false" or item.severity in ("S1", "S5") for item in response.claims
+    )
+    if allow_pending_review and has_blocking and not has_critical:
+        passed = True
+        has_pending_review = True
+    else:
+        passed = not has_blocking
+        has_pending_review = False
+    return FactCheckResult(
+        audit_items=list(response.claims),
+        fact_check_passed=passed,
+        has_pending_review=has_pending_review,
+        removed_unsupported_claims=0,
+        audited_markdown=humanized_markdown,
+        validated_zettels=list(zettels or []),
+        validated_tensions=list(tensions or []),
     )
 
 
 def fact_check_node(
     state: LessonPipelineState,
     client: StructuredLLMClient,
+    max_repair_attempts: int = 1,
+    allow_pending_review: bool = False,
 ) -> LessonPipelineState:
     """Graph node executor for the fact-checking stage within the lesson pipeline.
 
@@ -602,6 +788,7 @@ def fact_check_node(
     Args:
         state: Pipeline state prior to factual auditing.
         client: Structured LLM client implementation.
+        max_repair_attempts: Maximum repair retries for missing locators or unlocated quotes.
 
     Returns:
         Updated LessonPipelineState containing factual audit results.
@@ -618,10 +805,13 @@ def fact_check_node(
         zettels=state.extracted_zettels,
         tensions=state.detected_tensions,
         transcript=state.transcript,
+        max_repair_attempts=max_repair_attempts,
+        allow_pending_review=allow_pending_review,
     )
 
     state.audit_items = list(result.audit_items)
     state.fact_check_passed = result.fact_check_passed
+    state.has_pending_review = result.has_pending_review
     state.removed_unsupported_claims = result.removed_unsupported_claims
     state.audited_markdown = result.audited_markdown
     state.extracted_zettels = result.validated_zettels
@@ -631,13 +821,16 @@ def fact_check_node(
 
 __all__ = [
     "DEFAULT_FACT_CHECKER_PROMPT_PATH",
+    "DEFAULT_INVARIANCE_PROMPT_PATH",
     "apply_audit_remediations",
+    "audit_humanized_invariance",
     "audit_lesson_draft",
     "fact_check_node",
     "filter_and_remediate_tensions",
     "filter_and_remediate_zettels",
     "format_fact_checker_user_prompt",
     "get_fact_checker_prompt",
+    "get_invariance_prompt",
     "locate_and_apply_remediation",
     "normalize_claim_punctuation",
 ]

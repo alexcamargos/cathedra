@@ -8,9 +8,9 @@ loop allowing up to 3 self-correction attempts.
 import re
 from pathlib import Path
 
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.agents.validators import LinterViolation, validate_markdown_prose
-from mba_wiki.schemas import HumanizerResult, LessonPipelineState
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.agents.validators import LinterViolation, validate_markdown_prose
+from cathedra.schemas import HumanizerResult, LessonPipelineState
 
 DEFAULT_HUMANIZER_PROMPT_PATH = Path(__file__).parent / "prompts" / "humanizer.md"
 
