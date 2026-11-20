@@ -131,23 +131,24 @@ prefixos numericos sem retranscrever os videos, use `uv run cathedra bind-transc
 depois execute sem `--dry-run`. O relatorio de auditoria registra o caminho absoluto do JSON, o nome do video original
 e se a escolha foi explicita, automatica ou em memoria.
 
-Em paginas de aula existentes, o reprocessamento preserva o frontmatter e as anotacoes fora do
-bloco automatico; o frontmatter pode continuar com metadados da criacao. Se faltarem marcadores,
-`--force` preserva o texto anterior e acrescenta um novo bloco, que pode exigir revisao manual.
-Marcadores duplicados ou invertidos exigem correcao manual.
+Em paginas de aula existentes, o reprocessamento preserva notas manuais e chaves customizadas,
+atualizando seletivamente os metadados gerenciados de auditoria no frontmatter (`processed_date`,
+`fact_check_passed`, `fact_check_status`, `removed_claims`). Em Zettels existentes, `--force`
+permite atualizar o corpo conceitual dentro de `AUTO-CONTENT` preservando tags, conexoes diretas
+e backlinks. Se faltarem marcadores, `--force` preserva o texto anterior e acrescenta um novo bloco;
+marcadores duplicados ou invertidos exigem correcao manual.
 
 O processamento de uma aula prepara os arquivos antes de grava-los no cofre e tenta restaurar as
 versoes anteriores se uma substituicao falhar. Se uma restauracao nao for segura, o comando informa
 onde foram mantidas as copias. A operacao nao garante atomicidade entre arquivos em caso de queda
 abrupta do processo ou do computador; evite editar os mesmos arquivos durante a exportacao.
 
-Se a auditoria factual identificar bloqueadores nao resolvidos, a aula nao e publicada.
-O relatorio fica em `03_Auditoria_Factual/pendentes/` para revisao; `--force` nao ignora esse bloqueio.
-Apos a reescrita, uma segunda chamada ao auditor verifica o texto e os Zettels finais;
-qualquer desvio apontado nessa etapa tambem interrompe a publicacao para revisao.
-O veredito `verified` indica apoio identificado no material de aula fornecido, nao verificacao
-independente. A bibliografia listada nao e consultada automaticamente. O programa confere a
-localizacao literal do trecho citado, mas nao garante sua pertinencia ou a correcao da fonte.
+O guardrail factual (`skills/cathedra-guardrail.md`) executa em passada unica tendo como referencias
+exclusivas o conteudo dos slides (PDF/PPTX) e a transcricao da aula, sem travar por explicacoes
+didaticas coerentes. Se identificar erros criticos (`S1`/`S5`) ou alucinacoes (`S4`) nao resolvidas,
+a aula nao e publicada e o relatorio fica em `03_Auditoria_Factual/pendentes/`; `--force` nao ignora
+esse bloqueio. Apos a reescrita estilistica, o auditor de invariancia compara o texto auditado contra
+o humanizado e verifica pares antes/depois apenas para Zettels alterados pelo Humanizer.
 
 ### 4. Sincronizar Diario de Tensoes
 

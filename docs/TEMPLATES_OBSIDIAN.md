@@ -45,7 +45,7 @@ tags:
 ## 2. Pagina de Aula na Wiki (`Aula_<NN>_<slug_tema>.md`)
 Localizacao: `01_Wiki_Disciplinas/<discipline_slug>/Aula_<NN>_<lesson_slug>.md`
 
-O corpo da aula (`body_markdown`), os conceitos atomicos vinculados, conexoes interdisciplinares e tensoes dialeticas ficam protegidos entre marcadores automaticos. Ao reprocessar, todo o texto fora desses marcadores e preservado, inclusive frontmatter, cabecalho e notas pessoais. Por isso, campos do frontmatter representam os valores da criacao da pagina e nao sao atualizados automaticamente; os dados atuais da auditoria constam no JSON correspondente.
+O corpo da aula (`body_markdown`), os conceitos atomicos vinculados e as conexoes interdisciplinares (`cross_links`) ficam protegidos entre os marcadores `AUTO-CONTENT`. Ao reprocessar, notas pessoais, chaves customizadas do frontmatter e texto externo aos marcadores sao preservados; apenas as chaves gerenciadas de auditoria no frontmatter (`processed_date`, `fact_check_passed`, `fact_check_status`, `removed_claims`) sao atualizadas seletivamente.
 
 Com `--force`, se um ou ambos os marcadores estiverem ausentes, o texto existente e preservado, eventuais marcadores isolados sao removidos e um novo bloco automatico e acrescentado ao final. O conteudo antigo pode permanecer visivel para revisao. Marcadores duplicados ou em ordem invertida impedem a gravacao, inclusive com `--force`.
 
@@ -61,6 +61,7 @@ processed_date: {{ processed_date }}
 source_slide: "{{ source_slide_filename }}"
 source_transcript: "{{ source_transcript_filename }}"
 fact_check_passed: {{ fact_check_passed | lower }}
+fact_check_status: {{ fact_check_status }}
 removed_claims: {{ removed_unsupported_claims }}
 tags:
   - mba/aula
@@ -82,12 +83,7 @@ tags:
 
 ## Conexoes Transversais no Curriculo
 {% for link in cross_links %}
-- [[01_Wiki_Disciplinas/{{ link.target_discipline_slug }}/_Indice_Materia|{{ link.target_discipline_name }}]]: {{ link.connection_summary }}
-{% endfor %}
-
-## Tensoes Dialeticas Identificadas
-{% for tension in detected_tensions %}
-- [[04_Diario_Tensoes/{{ tension.tension_slug }}|{{ tension.title }}]]: {{ tension.thesis }} vs. {{ tension.antithesis }}
+- [[01_Wiki_Disciplinas/{{ link.target_discipline_slug }}/_Indice_Materia|{{ link.target_topic }}]] (`{{ link.connection_type }}`): {{ link.description }}
 {% endfor %}
 <!-- AUTO-CONTENT:END -->
 
@@ -101,7 +97,7 @@ tags:
 ## 3. Nota Atomica no Zettelkasten (`02_Zettelkasten/<slug>.md`)
 Localizacao: `02_Zettelkasten/<slug>.md`
 
-Se o arquivo ja existir, o exportador preserva `content_markdown` e `domain_tags` existentes, une sem duplicatas novas tags em `tags` e acrescenta a aula atual na secao `## Referencias no Curso`.
+Se o arquivo ja existir sem `--force`, o exportador preserva `content_markdown` e `domain_tags` existentes, une sem duplicatas novas tags em `tags`, mescla `## Conexoes Diretas` e acrescenta a aula atual em `## Referencias no Curso`. Com `--force`, atualiza o corpo conceitual dentro de `AUTO-CONTENT` (inclusive migrando Zettels legados com `type: zettel`) preservando chaves customizadas do frontmatter, conexoes diretas e backlinks.
 
 O frontmatter e as anotacoes na secao de conexoes sao preservados; novas tags sao mescladas quando `tags` usa a lista em linhas do template. Formatos alternativos de tags nao sao reescritos. Na recuperacao de marcadores ausentes, o texto existente e mantido; marcadores duplicados ou invertidos bloqueiam a escrita.
 
@@ -118,7 +114,9 @@ tags:
 
 # {{ title }}
 
+<!-- AUTO-CONTENT:START -->
 {{ content_markdown }}
+<!-- AUTO-CONTENT:END -->
 
 ## Conexoes Diretas
 {% for link in related_links %}
@@ -218,6 +216,7 @@ Arquivo JSON salvo pelo `obsidian_writer.py` para cada execucao do pipeline, reg
   "lesson_title": "Titulo da Aula",
   "processed_date": "2026-11-07",
   "fact_check_passed": true,
+  "has_pending_review": false,
   "source_transcript_filename": "Aula_01.mp4",
   "source_transcript_path": "C:/caminho/transcricoes/Aula_01.json",
   "source_transcript_binding": "explicit",
