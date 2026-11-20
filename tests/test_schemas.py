@@ -1104,3 +1104,42 @@ def test_lesson_audit_report_supports_has_pending_review() -> None:
     )
     restored = LessonAuditReport.model_validate_json(report.model_dump_json())
     assert restored.has_pending_review is True
+
+
+def test_draft_result_normalizes_double_escaped_newlines_preserving_latex_and_code() -> None:
+    """Tests that DraftResult and AtomicZettel normalize literal \\n outside LaTeX and code.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    zettel = AtomicZettel(
+        slug="crs",
+        title="CRS",
+        domain_tags=["gis"],
+        content_markdown=(
+            "Introdução.\\n\\n"
+            "- **CRS Geográfico:** usa $\\nu \\neq 0$ e `print('a\\nb')`.\\n\\n"
+            "$$I = \\frac{1}{n}$$\\n\\nConclusão."
+        ),
+        related_links=[],
+    )
+    draft = DraftResult(
+        raw_draft="Parágrafo 1.\\n\\n```python\nmsg = 'linha1\\nlinha2'\n```\\n\\nParágrafo 2.",
+        extracted_zettels=[zettel],
+    )
+
+    assert "\\n" not in zettel.content_markdown.replace("`print('a\\nb')`", "").replace(
+        "$\\nu \\neq 0$", ""
+    )
+    assert "\n\n- **CRS Geográfico:**" in zettel.content_markdown
+    assert "$\\nu \\neq 0$" in zettel.content_markdown
+    assert "`print('a\\nb')`" in zettel.content_markdown
+    assert "\n\n$$I = \\frac{1}{n}$$\n\nConclusão." in zettel.content_markdown
+    assert "msg = 'linha1\\nlinha2'" in draft.raw_draft
+    assert "Parágrafo 1.\n\n```python" in draft.raw_draft

@@ -4,10 +4,51 @@ Defines schemas for course syllabi, slide chunks, factual auditing, atomic
 zettels, wiki lessons, and the end-to-end pipeline state machine.
 """
 
+import re
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+_RE_PROTECTED_MARKDOWN = re.compile(
+    r"<!--[\s\S]*?-->"
+    r"|```[\s\S]*?```"
+    r"|~~~[\s\S]*?~~~"
+    r"|\$\$[\s\S]*?\$\$"
+    r"|`[^`\n]+`"
+    r"|(?<!\$)\$(?!\$)[^$\n]+(?<!\$)\$(?!\$)"
+)
+_RE_LITERAL_NEWLINE = re.compile(r"(?<!\\)\\n")
+
+
+def normalize_literal_newlines(text: str) -> str:
+    """Converts double-escaped literal '\\n' sequences into real newlines outside code/LaTeX.
+
+    Preserves HTML comments, fenced code blocks, inline code, and LaTeX math spans
+    (such as '\\nu' or '\\neq') byte-for-byte while restoring real paragraph breaks in prose.
+
+    Args:
+        text: Markdown string potentially containing double-escaped literal '\\n' sequences.
+
+    Returns:
+        Normalized Markdown string with real line breaks in unprotected prose.
+
+    Raises:
+        None.
+    """
+    if "\\n" not in text:
+        return text
+    parts: list[str] = []
+    last_end = 0
+    for match in _RE_PROTECTED_MARKDOWN.finditer(text):
+        start, end = match.span()
+        if start > last_end:
+            parts.append(_RE_LITERAL_NEWLINE.sub("\n", text[last_end:start]))
+        parts.append(match.group(0))
+        last_end = end
+    if last_end < len(text):
+        parts.append(_RE_LITERAL_NEWLINE.sub("\n", text[last_end:]))
+    return "".join(parts)
 
 
 class SyllabusModule(BaseModel):
@@ -199,6 +240,22 @@ class AtomicZettel(BaseModel):
     content_markdown: str
     related_links: list[str]
 
+    @field_validator("content_markdown")
+    @classmethod
+    def _normalize_content_markdown(cls, value: str) -> str:
+        """Normalizes double-escaped literal newlines in zettel markdown prose.
+
+        Args:
+            value: Raw zettel markdown content.
+
+        Returns:
+            Normalized markdown string with real line breaks outside code and LaTeX.
+
+        Raises:
+            None.
+        """
+        return normalize_literal_newlines(value)
+
 
 class CrossDisciplineLink(BaseModel):
     """Schema representing a cross-disciplinary conceptual bridge between MBA subjects.
@@ -245,6 +302,22 @@ class DialecticalTension(BaseModel):
     synthesis_guidelines: str
     related_zettel_slugs: list[str] = Field(default_factory=list)
 
+    @field_validator("synthesis_guidelines")
+    @classmethod
+    def _normalize_synthesis_guidelines(cls, value: str) -> str:
+        """Normalizes double-escaped literal newlines in synthesis guidelines prose.
+
+        Args:
+            value: Raw synthesis guidelines markdown text.
+
+        Returns:
+            Normalized markdown string with real line breaks outside code and LaTeX.
+
+        Raises:
+            None.
+        """
+        return normalize_literal_newlines(value)
+
 
 class FactCheckResult(BaseModel):
     """Schema representing the consolidated factual audit outcome and text remediation.
@@ -281,6 +354,22 @@ class DraftResult(BaseModel):
     extracted_zettels: list[AtomicZettel] = Field(default_factory=list)
     cross_links: list[CrossDisciplineLink] = Field(default_factory=list)
     detected_tensions: list[DialecticalTension] = Field(default_factory=list)
+
+    @field_validator("raw_draft")
+    @classmethod
+    def _normalize_raw_draft(cls, value: str) -> str:
+        """Normalizes double-escaped literal newlines in raw lesson draft prose.
+
+        Args:
+            value: Raw lesson draft markdown string.
+
+        Returns:
+            Normalized markdown string with real line breaks outside code and LaTeX.
+
+        Raises:
+            None.
+        """
+        return normalize_literal_newlines(value)
 
 
 class WikiLessonOutput(BaseModel):
@@ -512,4 +601,5 @@ __all__ = [
     "TranscriptCheckpoint",
     "VideoTranscript",
     "WikiLessonOutput",
+    "normalize_literal_newlines",
 ]
