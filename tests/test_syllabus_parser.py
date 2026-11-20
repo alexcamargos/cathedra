@@ -11,7 +11,7 @@ import pymupdf
 import pytest
 from pydantic import ValidationError
 
-from mba_wiki.ingestion.syllabus_parser import (
+from cathedra.ingestion.syllabus_parser import (
     get_syllabus_parser_prompt,
     load_structured_syllabus,
     parse_syllabus,
@@ -19,7 +19,7 @@ from mba_wiki.ingestion.syllabus_parser import (
     read_syllabus_source,
     save_structured_syllabus,
 )
-from mba_wiki.schemas import StructuredSyllabus, SyllabusModule
+from cathedra.schemas import StructuredSyllabus, SyllabusModule
 from tests.conftest import FakeLLMClient
 
 

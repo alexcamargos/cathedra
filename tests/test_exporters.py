@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mba_wiki.exporters.obsidian_writer import (
+from cathedra.exporters.obsidian_writer import (
     VaultExportResult,
     export_lesson_to_vault,
     format_zettels_section,
@@ -22,7 +22,7 @@ from mba_wiki.exporters.obsidian_writer import (
     write_lesson_page,
     write_tensions_index,
 )
-from mba_wiki.schemas import (
+from cathedra.schemas import (
     AtomicZettel,
     ClaimAuditItem,
     DialecticalTension,
@@ -252,7 +252,7 @@ def test_export_staging_failure_leaves_existing_vault_unchanged(
     def fail_audit(*args: object, **kwargs: object) -> Path:
         raise OSError("Falha simulada ao preparar auditoria")
 
-    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.write_audit_report", fail_audit)
+    monkeypatch.setattr("cathedra.exporters.obsidian_writer.write_audit_report", fail_audit)
     with pytest.raises(OSError, match="Falha simulada"):
         export_lesson_to_vault(tmp_path, changed, sample_syllabus)
     assert initial.lesson_path.read_bytes() == before[initial.lesson_path]
@@ -274,7 +274,7 @@ def test_export_aborts_if_user_edits_file_during_preparation(
         initial.lesson_path.write_text("Alteração do usuário", encoding="utf-8")
         return result
 
-    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.write_audit_report", edit_during_audit)
+    monkeypatch.setattr("cathedra.exporters.obsidian_writer.write_audit_report", edit_during_audit)
     changed = sample_lesson_output.model_copy(update={"body_markdown": "Corpo novo."})
     with pytest.raises(RuntimeError, match="changed during export"):
         export_lesson_to_vault(tmp_path, changed, sample_syllabus)
@@ -302,7 +302,7 @@ def test_export_commit_failure_restores_previous_files(
                 raise OSError("Falha simulada na substituição")
         original_replace(src, dst)
 
-    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_second_replace)
+    monkeypatch.setattr("cathedra.exporters.obsidian_writer.os.replace", fail_second_replace)
     with pytest.raises(OSError, match="Falha simulada"):
         export_lesson_to_vault(tmp_path, changed, sample_syllabus)
     assert calls >= 2
@@ -332,7 +332,7 @@ def test_export_rollback_does_not_overwrite_concurrent_edit(
                 raise OSError("Falha simulada")
         original_replace(src, dst)
 
-    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_after_concurrent_edit)
+    monkeypatch.setattr("cathedra.exporters.obsidian_writer.os.replace", fail_after_concurrent_edit)
     with pytest.raises(RuntimeError, match="backups retained"):
         export_lesson_to_vault(tmp_path, changed, sample_syllabus)
     assert result.lesson_path.read_text(encoding="utf-8") == "Edição simultânea do usuário"
@@ -362,7 +362,7 @@ def test_single_tensions_index_write_is_atomic_on_failure(
     def fail_replace(src: object, dst: object) -> None:
         raise OSError("Falha simulada na escrita")
 
-    monkeypatch.setattr("mba_wiki.exporters.obsidian_writer.os.replace", fail_replace)
+    monkeypatch.setattr("cathedra.exporters.obsidian_writer.os.replace", fail_replace)
     with pytest.raises(OSError, match="Falha simulada"):
         write_tensions_index(tmp_path, [sample_tension, other])
     assert path.read_bytes() == before
@@ -1370,3 +1370,41 @@ def test_write_atomic_zettel_force_auto_heals_missing_delimiters(
     assert "<!-- AUTO-BACKLINKS:END -->" in content
     assert "Aula_01_criterios-decisao" in content
     assert "Conceito intacto sem delimitadores de backlinks." in content
+
+
+def test_write_lesson_page_renders_pending_review_callout_and_frontmatter(tmp_path: Path) -> None:
+    """Exports lesson page with pending_review frontmatter and warning callout."""
+    from datetime import date
+
+    from cathedra.exporters.obsidian_writer import write_lesson_page
+    from cathedra.schemas import ClaimAuditItem, WikiLessonOutput
+
+    output = WikiLessonOutput(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        lesson_number=1,
+        lesson_title="Introdução",
+        lesson_slug="introducao",
+        processed_date=date(2026, 11, 20),
+        source_slide_filename="01.pdf",
+        fact_check_passed=True,
+        has_pending_review=True,
+        removed_unsupported_claims=0,
+        body_markdown="Conteúdo principal.",
+        extracted_zettels=[],
+        audit_items=[
+            ClaimAuditItem(
+                claim_id="C01",
+                quote="Afirmação sem localizador literal.",
+                category="technical",
+                verdict="verified",
+                evidence_status="pending_review",
+            )
+        ],
+    )
+
+    lesson_path = write_lesson_page(vault_root=tmp_path, output=output)
+    content = lesson_path.read_text(encoding="utf-8")
+    assert "fact_check_status: pending_review" in content
+    assert "> [!warning] Revisão Factual Pendente" in content
+    assert "`C01` (verified): Afirmação sem localizador literal." in content

@@ -11,7 +11,7 @@ import pptx
 import pymupdf
 import pytest
 
-from mba_wiki.ingestion.slide_parser import (
+from cathedra.ingestion.slide_parser import (
     extract_latex_equations,
     infer_slide_title,
     parse_pdf_slides,
@@ -19,7 +19,7 @@ from mba_wiki.ingestion.slide_parser import (
     parse_slides,
     table_to_markdown,
 )
-from mba_wiki.schemas import SlideChunk
+from cathedra.schemas import SlideChunk
 
 
 @pytest.fixture
