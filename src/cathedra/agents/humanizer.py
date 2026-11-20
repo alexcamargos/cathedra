@@ -9,7 +9,11 @@ import re
 from pathlib import Path
 
 from cathedra.agents.llm_client import StructuredLLMClient
-from cathedra.agents.validators import LinterViolation, validate_markdown_prose
+from cathedra.agents.validators import (
+    LinterViolation,
+    transform_prose_outside_protected,
+    validate_markdown_prose,
+)
 from cathedra.schemas import HumanizerResult, LessonPipelineState
 
 DEFAULT_HUMANIZER_PROMPT_PATH = Path(__file__).parent / "prompts" / "humanizer.md"
@@ -122,27 +126,27 @@ def strip_markdown_fences(text: str) -> str:
     return clean.strip()
 
 
-def sanitize_markdown_heuristics(text: str) -> str:
-    """Deterministically sanitizes common stylistic violations before LLM invocation.
+def _sanitize_prose_segment(segment: str) -> str:
+    """Sanitizes mechanical stylistic violations within an unprotected prose segment.
 
-    Applies deterministic transformations to resolve explanatory em-dashes and
-    en-dashes, decorative arrows, and stiff formulaic connectives to prevent
-    unnecessary LLM round-trips for simple atomic artifacts.
+    Preserves numeric ranges (converting en/em-dashes between digits into ASCII hyphens),
+    replaces explanatory dashes with commas, converts decorative arrows to ASCII equivalents,
+    and simplifies stiff connectives.
 
     Args:
-        text: Input markdown text potentially containing stylistic violations.
+        segment: Unprotected markdown prose slice outside code blocks and LaTeX math.
 
     Returns:
-        Sanitized markdown text with mechanical violations resolved.
+        Sanitized prose segment.
 
     Raises:
         None.
     """
-    if not text.strip():
-        return text
+    # Preserve numeric ranges (e.g. 2020–2024 or 1–5) as ASCII hyphens instead of commas
+    sanitized = re.sub(r"(?<=\d)\s*[—–]\s*(?=\d)", "-", segment)
 
     # Rule R1: Replace em-dash and en-dash used as parenthetical/explanatory dashes with commas
-    sanitized = re.sub(r"\s*[—–]\s*", ", ", text)
+    sanitized = re.sub(r"\s*[—–]\s*", ", ", sanitized)
     # Fix punctuation collisions caused by dash replacement (e.g., ", ," or ", .")
     sanitized = re.sub(r",\s*,+", ",", sanitized)
     sanitized = re.sub(r",\s*\.", ".", sanitized)
@@ -164,6 +168,28 @@ def sanitize_markdown_heuristics(text: str) -> str:
     sanitized = re.sub(r"(?i)\bcabe destacar que\s*", "", sanitized)
 
     return sanitized
+
+
+def sanitize_markdown_heuristics(text: str) -> str:
+    """Deterministically sanitizes common stylistic violations outside protected regions.
+
+    Applies deterministic transformations to prose outside HTML comments, code blocks,
+    inline code, and LaTeX math to resolve explanatory dashes, decorative arrows, and
+    stiff formulaic connectives while preserving numeric ranges and technical syntax.
+
+    Args:
+        text: Input markdown text potentially containing stylistic violations.
+
+    Returns:
+        Sanitized markdown text with mechanical violations resolved and technical blocks intact.
+
+    Raises:
+        None.
+    """
+    if not text.strip():
+        return text
+
+    return transform_prose_outside_protected(text, _sanitize_prose_segment)
 
 
 def humanize_text(

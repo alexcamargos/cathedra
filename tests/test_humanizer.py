@@ -429,3 +429,37 @@ def test_humanize_node_pre_sanitizes_simple_violations_without_extra_llm_call(
     assert len(fake_llm_client.calls) == 1
     assert "—" not in updated_state.extracted_zettels[0].content_markdown
     assert "uma métrica objetiva" in updated_state.extracted_zettels[0].content_markdown
+
+
+def test_sanitize_markdown_heuristics_preserves_numeric_ranges_code_and_latex() -> None:
+    """Tests that sanitize_markdown_heuristics protects numeric ranges, code blocks, and LaTeX.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from cathedra.agents.humanizer import sanitize_markdown_heuristics
+
+    raw = (
+        "No período 2020–2024 — ciclo de juros elevados — o risco cresceu A → B.\n\n"
+        "A equação $x → y$ e `valor — 1` devem permanecer intactos.\n\n"
+        "```python\n"
+        "def calc():\n"
+        "    # seta → e travessão — dentro do código\n"
+        "    return '2020–2024'\n"
+        "```"
+    )
+    cleaned = sanitize_markdown_heuristics(raw)
+    assert "2020-2024" in cleaned
+    assert "2020, 2024" not in cleaned
+    assert "ciclo de juros elevados," in cleaned
+    assert "A -> B" in cleaned
+    assert "$x → y$" in cleaned
+    assert "`valor — 1`" in cleaned
+    assert "# seta → e travessão — dentro do código" in cleaned
+    assert "return '2020–2024'" in cleaned
