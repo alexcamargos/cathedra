@@ -41,15 +41,23 @@ Este documento especifica os contratos e algoritmos que devem ser implementados 
 
 ### Regra R3: Teto de 4 Frases por Paragrafo
 - **Regra:** Nenhum paragrafo de texto corrido pode conter mais de 4 frases.
-- **Definicao de paragrafo:** Blocos de texto separados por duas ou mais quebras de linha (`\n\n+`), excluindo titulos (`#`, `##`, etc.) e citacoes em bloco (`>`).
-- **Definicao de sentenca:** Delimitada por pontuacao final (`.`, `!`, `?`) seguida de espaco em branco ou fim de linha, com desconsideracao de abreviacoes comuns (ex: `ex.`, `i.e.`, `e.g.`, `Dr.`, `Prof.`, `et al.`, `vs.`) e numeros decimais.
+- **Definicao de paragrafo:** Blocos de texto separados por duas ou mais quebras de linha (`\n\n+`), excluindo titulos (`#`, `##`, etc.), citacoes em bloco (`>`), tabelas (`|`) e listas simples (itens `- `, `* `, `+ ` ou numerados que nao violem `R4`).
+- **Definicao de sentenca:** Delimitada por pontuacao final (`.`, `!`, `?`) seguida de espaco em branco ou fim de linha, com desconsideracao de abreviacoes comuns (ex: `ex.`, `p.ex.`, `i.e.`, `e.g.`, `Dr.`, `Prof.`, `et al.`, `vs.`, `etc.`, `obs.`, `S.A.`, `Ltda.`), iniciais de autores (`W. Tobler`) e numeros decimais.
 - **Severidade:** Erro bloqueante.
 
 ### Regra R4: Proibicao de Listas Mecanicas no Corpo da Prosa
 - **Regra:** O corpo explicativo (`body_markdown`) deve ser redigido em prosa contínua articulada. Listas com hífens ou números que adotam o padrão clichê de IA (`- **Conceito:** explicação`) são proibidas.
 - **Regex de captura:**
   ```python
-  RE_AI_BULLET_PATTERN = r"^\s*[-*]\s+\*\*[^*]+:\*\*\s+"
+  RE_AI_BULLET_PATTERN = r"^\s*[-*]\s+\*\*[^*]+(?::\*\*|\*\*:\s*)"
+  ```
+- **Severidade:** Erro bloqueante.
+
+### Regra R5: Proibicao de Quebras de Linha Literais (`\n`) na Prosa
+- **Regra:** Sequencias literais `\n` (escape duplo de JSON) sao proibidas fora de blocos de codigo e expressoes LaTeX.
+- **Regex de captura:**
+  ```python
+  RE_LITERAL_NEWLINE = r"(?<!\\)\\n"
   ```
 - **Severidade:** Erro bloqueante.
 
@@ -73,7 +81,7 @@ O validador deve checar, de forma insensivel a maiusculas/minusculas (*case-inse
 - `"o que realmente importa é"`
 - `"na essência"`
 - `"não é apenas sobre"`
-- `"mais do que"`
+- `"mais do que ... trata-se de / é sobre / significa"` (construcoes retoricas vazias; comparacoes quantitativas como `"mais do que 30 observacoes"` sao permitidas)
 
 ### Grupo L3: Metaforas Gastas e Verbos Figurados
 - `"mergulho profundo"`

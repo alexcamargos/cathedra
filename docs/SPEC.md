@@ -23,30 +23,25 @@ O processamento de uma aula ocorre em 5 estagios sequenciais com estado tipado:
    - Gera o rascunho da pagina da aula (`Aula_XX_Tema.md`) em formato de capitulo sequencial, fundindo a estrutura do slide com a explicacao oral da videoaula quando disponivel.
    - Identifica conceitos universais, teoremas ou modelos para criar ou vincular notas atomicas (`[[WikiLinks]]`) na pasta de Zettelkasten.
    - Analisa tensoes dialeticas e trade-offs interdisciplinares entre a materia atual e outras disciplinas da ementa (`DialecticalTension` e `CrossDisciplineLink`).
-3. **Auditoria Factual Adversarial (`fact_check_node`):**
-   - Extrai todas as afirmacoes objetivas (datas, formulas, autores, premissas, metricas) do rascunho expandido.
-   - Confronta as afirmacoes identificadas contra o conteudo fornecido dos slides, a ementa estruturada e a transcricao automatica, quando presente. A lista bibliografica nao constitui acesso ao conteudo das obras.
-   - Um veredito `verified` indica apenas suporte declarado no material fornecido. Exige tipo de fonte, trecho literal e localizacao; o codigo confirma a presenca do trecho e bloqueia a publicacao se ele nao for localizado. Isso nao comprova que o trecho sustenta semanticamente a afirmacao ou que esteja correto.
-   - Classifica desvios de S1 a S6: corrige imprecisoes e erros factuais (S1/S2) e remove afirmacoes sem lastro verificavel (S4), contabilizando `removed_unsupported_claims`.
-   - Audita o corpo da aula, os Zettels atomicos candidatos e as tensoes dialeticas identificadas, expurgando zettels e tensoes contaminados por declaracoes falsas (`S1`) ou sem lastro (`S4`).
-   - Bloqueia o avanco do pipeline (`has_unresolved_blockers = True`) caso correcoes essenciais nao tenham sido aplicadas com sucesso no texto.
-   - Em caso de bloqueio, interrompe antes do Humanizer e grava o relatorio em `03_Auditoria_Factual/pendentes/`, sem alterar a aula publicada nem sua auditoria aprovada.
-   - Registra desvios conceituais/logicos (S3/S5) e imprecisoes menores (S6) em `ClaimAuditItem`.
-   - Define `fact_check_passed = True` se as afirmacoes identificadas forem suportadas ou devidamente corrigidas/removidas sem violacoes graves pendentes; a extracao e a avaliacao semantica feitas pela LLM nao garantem cobertura integral.
-4. **Linter Estilistico (`humanizer_node`):**
-   - Aplica pre-sanitizacao deterministica em Python para Zettels atomicos, eliminando retentativas excessivas e chamadas repetidas N+1 a LLM.
-   - Reescreve a prosa (`body_markdown` e `content_markdown`) seguindo as diretrizes do `docs/LINTER_RULES.md`, protegendo cercas e blocos legitimos de codigo Markdown.
-   - Executa validacao deterministica via codigo (`validators.py`).
-   - Se houver violacoes, realimenta os erros a LLM em ate 3 tentativas de autocorrecao; se persistirem erros apos a 3ª tentativa, lanca `ValidationError` interrompendo o pipeline para evitar gravacao corrompida no Vault.
-   - Apos a reescrita, executa nova auditoria sobre o corpo final, Zettels e tensoes. Qualquer desvio factual apontado nessa verificacao bloqueia a publicacao e gera relatorio pendente, mesmo se houver correcao sugerida; os vereditos registram a etapa `draft` ou `final`.
+3. **Guardrail Anti-Alucinacao (`fact_check_node`):**
+   - Opera em **passada unica** usando o schema enxuto `GuardrailResponse` (`issues: list[GuardrailIssue]`), focado exclusivamente em impedir erros materiais graves (`S1`/`S5`) e alucinacoes reais (`S4`), sem executar auditoria forense citacao a citacao.
+   - Usa como referencias exclusivas o conteudo extraido dos slides (PDF/PPTX) e a transcricao da fala do professor; o resumo e os topicos da ementa situam apenas o escopo da disciplina, e a bibliografia da ementa nao e injetada nem conta como obra consultada.
+   - Explicacoes didaticas corretas, parafrases fieis e definicoes conceituais consolidadas da area retornam `issues: []` e nao bloqueiam o fluxo.
+   - Corrige erros materiais (`S1`/`S2`/`S3`/`S5`) quando `proposed_fix` e fornecido e remove alucinacoes (`S4`) preservando indentacao de blocos de codigo e listas; observacoes `S2`/`S6` sem `proposed_fix` sao registradas sem bloqueio duro.
+   - Filtra e remedia `extracted_zettels` e `detected_tensions` sobre copias defensivas (sem mutacao in-place), expurgando itens contaminados por `S1`/`S4` nao resolvidos.
+   - Bloqueia o avanco do pipeline (`FactCheckBlockedError`) antes do Humanizer e grava o relatorio em `03_Auditoria_Factual/pendentes/` quando restarem erros criticos (`S1`/`S5`) ou alucinacoes nao resolvidas. Com `--allow-pending-review`, pendencias nao criticas podem publicar marcadas como `pending_review`, mas erros criticos `S1`/`S5` (inclusive orfaos ou em Zettels/Tensoes) permanecem bloqueados.
+4. **Linter Estilistico e Invariancia Pos-Humanizador (`humanizer_node` + `audit_humanized_invariance`):**
+   - Normaliza sequencias literais `\n` fora de codigo/LaTeX na fronteira de `DraftResult` e aplica pre-sanitizacao deterministica mascarada (`sanitize_markdown_heuristics`) preservando codigo, LaTeX e faixas numericas (`2020-2024`).
+   - Reescreve a prosa (`body_markdown` e Zettels com violacoes) seguindo `docs/LINTER_RULES.md`, sem fallback para `raw_draft` nao auditado.
+   - Executa validacao deterministica via `validators.py` (incluindo `R5_LITERAL_NEWLINE`); em caso de violacoes, reenvia o feedback ancorado no `audited_markdown` original em ate 3 tentativas, lancando `HumanizerValidationError` se nao convergir.
+   - Apos a reescrita, executa verificacao de invariancia (`audit_humanized_invariance`) comparando `audited_markdown` vs. `humanized_markdown` e pares antes/depois apenas para Zettels efetivamente alterados pelo Humanizer; desvios criticos bloqueiam a publicacao e gravam relatorio pendente.
 5. **Persistencia na Wiki e Recuperacao no Obsidian (`persistence_node`):**
-   - Grava a pagina da aula na pasta da respectiva disciplina no Obsidian, preservando notas manuais do usuario fora dos delimitadores de conteudo.
+   - Grava a pagina da aula na pasta da respectiva disciplina no Obsidian, preservando notas manuais do usuario fora dos delimitadores `AUTO-CONTENT` e exportando Zettels relacionados e `cross_links` (`## Conexoes Transversais no Curriculo`).
+   - Atualiza seletivamente as chaves gerenciadas de auditoria no frontmatter da aula (`processed_date`, `fact_check_passed`, `fact_check_status`, `removed_claims`) em reprocessamentos, preservando chaves personalizadas e notas manuais.
    - Atualiza o arquivo `_Indice_Materia.md` (MOC da disciplina) de forma idempotente sem duplicatas.
-   - Grava as notas atomicas novas ou atualizadas na pasta `02_Zettelkasten/`.
-   - Grava ou atualiza notas de tensao dialetica em `04_Diario_Tensoes/<tension_slug>.md` e consolida o `_Indice_Tensoes.md`.
-   - Na pagina de aula, `--force` recupera delimitadores ausentes sem descartar texto existente; marcadores duplicados ou invertidos bloqueiam a gravacao. O frontmatter existente e preservado e pode conter metadados anteriores ao reprocessamento.
-   - Indices, Zettels e tensoes preservam as anotacoes existentes e rejeitam delimitadores ambiguos; `--force` adiciona blocos ausentes sem apagar o texto anterior.
-   - O exportador prepara todos os artefatos fora do cofre e, em caso de erro na substituicao, tenta restaurar os arquivos ja modificados. Alteracoes concorrentes detectadas nao sao sobrescritas na restauracao; se ela nao puder ser concluida, as copias de seguranca sao preservadas e seu caminho e informado. Interrupcoes abruptas e modificacoes concorrentes nao podem ser tratadas como uma transacao atomica multipla.
+   - Grava notas atomicas em `02_Zettelkasten/` com delimitadores `AUTO-CONTENT` e `AUTO-BACKLINKS`; reprocessar com `--force` permite atualizar o corpo de Zettels existentes (inclusive legados com `type: zettel`) preservando tags, conexoes diretas e backlinks.
+   - Grava ou atualiza notas de tensao dialetica em `04_Diario_Tensoes/<tension_slug>.md`, consolida `_Indice_Tensoes.md` e persiste `LessonAuditReport` (incluindo `has_pending_review`) em `03_Auditoria_Factual/`.
+   - O exportador prepara todos os artefatos fora do cofre e, em caso de erro na substituicao, tenta restaurar os arquivos ja modificados sem sobrescrever edicoes concorrentes.
 
 ## 3. Contratos de dados (Schemas Pydantic v2)
 
@@ -88,6 +83,20 @@ class ClaimAuditItem(BaseModel):
     evidence_status: Literal["material_supported", "pending_review"] = "pending_review"
 
 
+class GuardrailIssue(BaseModel):
+    claim_id: str
+    quote: str
+    category: Literal["formula", "date", "attribution", "technical", "metric"]
+    verdict: Literal["false", "imprecise", "misleading", "unsupported"]
+    severity: Literal["S1", "S2", "S3", "S4", "S5", "S6"]
+    reason: str | None = None
+    proposed_fix: str | None = None
+
+
+class GuardrailResponse(BaseModel):
+    issues: list[GuardrailIssue] = Field(default_factory=list)
+
+
 class AtomicZettel(BaseModel):
     slug: str
     title: str
@@ -98,19 +107,23 @@ class AtomicZettel(BaseModel):
 
 class CrossDisciplineLink(BaseModel):
     target_discipline_slug: str
-    target_discipline_name: str
-    connection_summary: str
-    epistemic_conflict: str | None = None
+    target_topic: str
+    connection_type: Literal["prerequisite", "impact", "contrast", "synergy"]
+    description: str
 
 
 class DialecticalTension(BaseModel):
-    tension_slug: str
+    slug: str
     title: str
-    disciplines_involved: list[str]
-    thesis: str
-    antithesis: str
-    synthesis_paradox: str
-    practical_implication: str
+    pole_a_discipline: str
+    pole_a_framework: str
+    pole_a_thesis: str
+    pole_b_discipline: str
+    pole_b_framework: str
+    pole_b_thesis: str
+    tension_nature: str
+    synthesis_guidelines: str
+    related_zettel_slugs: list[str] = Field(default_factory=list)
 
 
 class TranscriptSegment(BaseModel):
@@ -167,6 +180,7 @@ class WikiLessonOutput(BaseModel):
     source_transcript_path: str | None = None
     source_transcript_binding: Literal["explicit", "auto", "in_memory"] | None = None
     fact_check_passed: bool
+    has_pending_review: bool = False
     removed_unsupported_claims: int
     body_markdown: str
     extracted_zettels: list[AtomicZettel]
@@ -182,6 +196,7 @@ class LessonAuditReport(BaseModel):
     lesson_title: str
     processed_date: date
     fact_check_passed: bool
+    has_pending_review: bool = False
     total_claims_audited: int
     removed_unsupported_claims: int
     audit_items: list[ClaimAuditItem] = Field(default_factory=list)
