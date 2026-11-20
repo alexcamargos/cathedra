@@ -22,10 +22,11 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def extract_json_payload(raw_output: str) -> str:
-    """Extracts JSON payload from raw LLM or CLI output.
+    """Extracts a balanced JSON object or array payload from raw LLM or CLI output.
 
     Handles outer markdown fences, log preambles, and conversational postambles
-    by locating the balanced outermost '{...}' or '[...]' envelope.
+    containing stray braces by decoding the first balanced JSON object or array
+    using json.JSONDecoder.raw_decode.
 
     Args:
         raw_output: Raw string returned from LLM execution.
@@ -38,29 +39,22 @@ def extract_json_payload(raw_output: str) -> str:
     """
     stripped = raw_output.strip()
 
-    # 1. Try stripping outer markdown code fences if wrapped
+    # 1. Strip outer markdown code fences if wrapped
     if stripped.startswith("```"):
         fenced = re.sub(r"^```(?:json)?\s*", "", stripped)
         fenced = re.sub(r"\s*```$", "", fenced).strip()
         stripped = fenced
 
-    # 2. Check if already clean JSON
-    if (stripped.startswith("{") and stripped.endswith("}")) or (
-        stripped.startswith("[") and stripped.endswith("]")
-    ):
-        return stripped
-
-    # 3. Locate outermost balanced '{' and '}'
-    first_brace = stripped.find("{")
-    last_brace = stripped.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        return stripped[first_brace : last_brace + 1].strip()
-
-    # 4. Locate outermost balanced '[' and ']'
-    first_bracket = stripped.find("[")
-    last_bracket = stripped.rfind("]")
-    if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
-        return stripped[first_bracket : last_bracket + 1].strip()
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(stripped):
+        if ch not in ("{", "["):
+            continue
+        try:
+            parsed, end_idx = decoder.raw_decode(stripped, idx)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, (dict, list)):
+            return stripped[idx:end_idx].strip()
 
     return stripped
 
@@ -319,6 +313,48 @@ class GeminiRESTClient:
         resolved: dict[str, Any] = _resolve(schema)
         return resolved
 
+    def _extract_candidate_text(self, data: dict[str, Any], default: str = "") -> str:
+        """Extracts concatenated non-thought text from the first Gemini candidate.
+
+        Verifies candidate presence, enforces clean finishReason completion, filters out
+        internal thinking parts ('thought': True), and guards against API key leakage.
+
+        Args:
+            data: Parsed JSON response dictionary returned by Gemini REST API.
+            default: Fallback text when candidate content has no non-thought text parts.
+
+        Returns:
+            Concatenated response text string.
+
+        Raises:
+            ValueError: If no candidates are returned or sensitive data appears in output.
+            RuntimeError: If finishReason indicates truncation or safety/recitation block.
+        """
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise ValueError("No candidates returned by Gemini.")
+
+        first_candidate = candidates[0]
+        finish_reason = first_candidate.get("finishReason")
+        if finish_reason is not None and finish_reason != "STOP":
+            raise RuntimeError(
+                f"Gemini generation did not complete cleanly (finishReason={finish_reason})."
+            )
+
+        raw_parts = first_candidate.get("content", {}).get("parts") or []
+        text_segments: list[str] = []
+        for part in raw_parts:
+            if not isinstance(part, dict) or part.get("thought") is True:
+                continue
+            part_text = part.get("text")
+            if isinstance(part_text, str):
+                text_segments.append(part_text)
+
+        text = "".join(text_segments) if text_segments else default
+        if self.api_key.get_secret_value() in text:
+            raise ValueError("Gemini response contained sensitive data.")
+        return text
+
     def generate_structured(
         self,
         system_prompt: str,
@@ -338,7 +374,7 @@ class GeminiRESTClient:
             Validated instance of response_model.
 
         Raises:
-            RuntimeError: If API request fails.
+            RuntimeError: If API request fails or generation terminates abnormally.
             ValueError: If response parsing fails.
         """
         url = (
@@ -357,15 +393,7 @@ class GeminiRESTClient:
             ),
         }
         data = self._post_with_retry(url, payload)
-
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise ValueError("No candidates returned by Gemini.")
-
-        parts = candidates[0].get("content", {}).get("parts") or [{}]
-        raw_json = parts[0].get("text", "{}")
-        if self.api_key.get_secret_value() in raw_json:
-            raise ValueError("Gemini response contained sensitive data.")
+        raw_json = self._extract_candidate_text(data, default="{}")
         clean_json = extract_json_payload(raw_json)
         try:
             return response_model.model_validate_json(clean_json)
@@ -389,7 +417,7 @@ class GeminiRESTClient:
             Generated text string.
 
         Raises:
-            RuntimeError: If API request fails.
+            RuntimeError: If API request fails or generation terminates abnormally.
         """
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -397,21 +425,10 @@ class GeminiRESTClient:
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": temperature,
-            },
+            "generationConfig": self._build_generation_config(temperature),
         }
         data = self._post_with_retry(url, payload)
-
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise ValueError("No candidates returned by Gemini.")
-
-        parts = candidates[0].get("content", {}).get("parts") or [{}]
-        text = str(parts[0].get("text", ""))
-        if self.api_key.get_secret_value() in text:
-            raise ValueError("Gemini response contained sensitive data.")
-        return text
+        return self._extract_candidate_text(data, default="")
 
 
 class AGYCLIClient:

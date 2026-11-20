@@ -278,3 +278,141 @@ def test_gemini_rest_client_generate_text_no_candidates_raises(mocker: MockerFix
 
     with pytest.raises(ValueError, match="No candidates returned by Gemini"):
         client.generate_text(system_prompt="Sys", user_prompt="User")
+
+
+def test_gemini_rest_client_filters_thought_parts_and_concatenates_multipart(
+    mocker: MockerFixture,
+) -> None:
+    """Tests that thought parts are skipped and multi-part text segments are concatenated.
+
+    Args:
+        mocker: Pytest-mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    client = GeminiRESTClient(api_key="test_key", model="gemini-4-hydrogen:high")
+
+    structured_resp = mocker.MagicMock()
+    structured_resp.json.return_value = {
+        "candidates": [
+            {
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {"thought": True, "text": "Raciocínio interno {não json}"},
+                        {"text": '{"topic": "Estatística", '},
+                        {"text": '"score": 9.8}'},
+                    ]
+                },
+            }
+        ]
+    }
+    structured_resp.raise_for_status.return_value = None
+
+    text_resp = mocker.MagicMock()
+    text_resp.json.return_value = {
+        "candidates": [
+            {
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {"thought": True, "text": "Pensando antes de escrever..."},
+                        {"text": "Parte 1. "},
+                        {"text": "Parte 2."},
+                    ]
+                },
+            }
+        ]
+    }
+    text_resp.raise_for_status.return_value = None
+
+    mock_client_instance = mocker.MagicMock()
+    mock_client_instance.post.side_effect = [structured_resp, text_resp]
+    mock_client_instance.__enter__.return_value = mock_client_instance
+    mock_client_instance.__exit__.return_value = None
+    mocker.patch("httpx.Client", return_value=mock_client_instance)
+
+    structured = client.generate_structured("Sys", "User", SampleOutputModel)
+    assert structured.topic == "Estatística"
+    assert structured.score == 9.8
+
+    plain = client.generate_text("Sys", "User")
+    assert plain == "Parte 1. Parte 2."
+
+
+@pytest.mark.parametrize("reason", ["MAX_TOKENS", "SAFETY", "RECITATION"])
+def test_gemini_rest_client_rejects_abnormal_finish_reason(
+    mocker: MockerFixture,
+    reason: str,
+) -> None:
+    """Tests that non-STOP finishReason raises RuntimeError instead of silently truncating.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        reason: Abnormal finishReason returned by Gemini API.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    client = GeminiRESTClient(api_key="test_key")
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.json.return_value = {
+        "candidates": [
+            {
+                "finishReason": reason,
+                "content": {"parts": [{"text": "Texto cortado no meio"}]},
+            }
+        ]
+    }
+    mock_resp.raise_for_status.return_value = None
+
+    mock_client_instance = mocker.MagicMock()
+    mock_client_instance.post.return_value = mock_resp
+    mock_client_instance.__enter__.return_value = mock_client_instance
+    mock_client_instance.__exit__.return_value = None
+    mocker.patch("httpx.Client", return_value=mock_client_instance)
+
+    with pytest.raises(RuntimeError, match=reason):
+        client.generate_text("Sys", "User")
+
+
+def test_gemini_rest_client_generate_text_sends_thinking_config(mocker: MockerFixture) -> None:
+    """Tests that generate_text includes thinkingConfig when model spec has a level suffix.
+
+    Args:
+        mocker: Pytest-mock fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    client = GeminiRESTClient(api_key="test_key", model="gemini-4-hydrogen:medium")
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.json.return_value = {
+        "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "OK"}]}}]
+    }
+    mock_resp.raise_for_status.return_value = None
+
+    mock_client_instance = mocker.MagicMock()
+    mock_client_instance.post.return_value = mock_resp
+    mock_client_instance.__enter__.return_value = mock_client_instance
+    mock_client_instance.__exit__.return_value = None
+    mocker.patch("httpx.Client", return_value=mock_client_instance)
+
+    assert client.generate_text("Sys", "User", temperature=0.4) == "OK"
+    sent_payload = mock_client_instance.post.call_args.kwargs["json"]
+    assert sent_payload["generationConfig"] == {
+        "temperature": 0.4,
+        "thinkingConfig": {"thinkingLevel": "medium"},
+    }
