@@ -240,3 +240,16 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Escopo:** Identificar videos por caminho e SHA-256 e registrar configuracao efetiva; reutilizar apenas checkpoints correspondentes, detectar colisoes previamente e preservar JSONs anteriores ao reprocessar. Transcricoes antigas sem identidade sao sinalizadas como nao verificadas.
 - **Arquivos afetados:** `src/mba_wiki/schemas.py`, `src/mba_wiki/transcription/batch_runner.py`, `src/mba_wiki/transcription/transcriber.py`, `src/mba_wiki/transcription/telemetry.py`, `src/mba_wiki/cli.py`, `tests/test_batch_runner.py`, `tests/test_transcription_checkpoints.py`, `tests/test_cli.py`, `docs/SPEC.md`, `docs/TRANSCRIPTION_SPEC.md`, `README.md`.
 - **Criterio de aceite:** `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` sem erros.
+
+
+## Etapa 39: Vinculacao em lote de transcricoes existentes a ementa e ordem das aulas
+- **Status:** `[x]`
+- **Escopo:** Implementar `src/mba_wiki/transcription/binder.py` e o comando `bind-transcripts` em `src/mba_wiki/cli.py` (com `--dry-run`, `--syllabus-json`, `--transcripts-dir` e `--slides-dir`). Ler `ementa_estruturada.json`, parear subpastas de transcricoes com os `discipline_slug` oficiais da ementa (cruzando com os slides quando disponiveis), extrair `lesson_number` pelo prefixo numerico dos arquivos, gravar `discipline_slug` e `lesson_number` atomicamente nos JSONs sem invalidar `checkpoint` e reportar pastas ou arquivos sem correspondencia (ex.: `palestras`, lacunas ou aulas extras).
+- **Arquivos afetados:** `src/mba_wiki/transcription/binder.py`, `src/mba_wiki/cli.py`, `tests/test_transcript_binder.py`, `tests/test_cli.py`, `docs/TRANSCRIPTION_SPEC.md`, `README.md`.
+- **Criterio de aceite:** Testes unitarios e de CLI cobrindo `--dry-run`, correcao de `discipline_slug` legado, extracao de `lesson_number`, preservacao de `checkpoint` e relato de ambiguidades passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
+
+## Etapa 40: Execucao sequencial por disciplina na ordem da ementa e das aulas
+- **Status:** `[ ]`
+- **Escopo:** Implementar o comando `build-discipline` em `src/mba_wiki/cli.py` para processar todas as aulas de uma disciplina (ou todas as disciplinas na ordem exata de `ementa_estruturada.json` via `--all`), descobrindo slides ordenados por numero de aula, vinculando automaticamente as transcricoes ja normalizadas e interrompendo com seguranca diante de bloqueios factuais (`FactCheckBlockedError`).
+- **Arquivos afetados:** `src/mba_wiki/cli.py`, `tests/test_cli.py`, `docs/SPEC.md`, `README.md`.
+- **Criterio de aceite:** Testes com `CliRunner` e mocks comprovando a ordenacao pela ementa/numero de aula, vinculo automatico de transcricoes e interrupcao segura em bloqueio factual passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
