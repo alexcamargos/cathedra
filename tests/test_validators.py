@@ -416,3 +416,61 @@ def test_sentence_split_handles_closing_quotes_and_parentheses() -> None:
         "Por fim, concluiu a análise teórica."
     )
     assert count_sentences(text_with_quotes) == 3
+
+
+def test_r5_literal_newline_rejects_escaped_prose_and_ignores_latex_and_code() -> None:
+    """Tests that R5_LITERAL_NEWLINE flags literal \\n in prose but preserves LaTeX and code.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    corrupted = "Primeiro parágrafo.\\n\\nSegundo parágrafo."
+    bad_result = validate_markdown_prose(corrupted)
+    assert bad_result.is_valid is False
+    assert any(v.rule_id == "R5_LITERAL_NEWLINE" for v in bad_result.violations)
+
+    valid_technical = (
+        "Quando $\\nu \\neq 0$, o parâmetro controla os graus de liberdade.\n\n"
+        "No código inline `sep = '\\n'` ou no bloco abaixo:\n\n"
+        "```python\n"
+        "print('linha1\\nlinha2')\n"
+        "```"
+    )
+    good_result = validate_markdown_prose(valid_technical)
+    assert not any(v.rule_id == "R5_LITERAL_NEWLINE" for v in good_result.violations)
+
+
+def test_normalized_zettel_exposes_hidden_r4_ai_bullet_violations() -> None:
+    """Tests that normalizing double-escaped zettels allows R4_AI_BULLET to catch AI lists.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from cathedra.schemas import AtomicZettel
+
+    zettel = AtomicZettel(
+        slug="normalizacao",
+        title="Normalização",
+        domain_tags=["gis"],
+        content_markdown=(
+            "Normalização evita distorções:\\n"
+            "- **Por habitante:** para taxas populacionais.\\n"
+            "- **Por área:** para densidade territorial."
+        ),
+        related_links=[],
+    )
+    result = validate_markdown_prose(zettel.content_markdown)
+    assert result.is_valid is False
+    assert any(v.rule_id == "R4_AI_BULLET" for v in result.violations)

@@ -5,6 +5,7 @@ paragraph length limits, and strict lexical blacklists according to docs/LINTER_
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # Rule R1: Prohibited explanatory dashes (em-dash and en-dash)
@@ -16,6 +17,19 @@ RE_EMOJIS = re.compile(r"[\U0001F300-\U0001FAFF]|[\U00002600-\U000027BF]")
 
 # Rule R4: Prohibited mechanical bullet list pattern
 RE_AI_BULLET_PATTERN = re.compile(r"^\s*[-*]\s+\*\*[^*]+(?::\*\*|\*\*:\s*)", re.MULTILINE)
+
+# Rule R5: Prohibited double-escaped literal newline outside code/LaTeX
+RE_LITERAL_NEWLINE = re.compile(r"(?<!\\)\\n")
+
+# Protected technical markdown regions (HTML comments, code blocks, LaTeX, inline code)
+RE_PROTECTED_MARKDOWN = re.compile(
+    r"<!--[\s\S]*?-->"
+    r"|```[\s\S]*?```"
+    r"|~~~[\s\S]*?~~~"
+    r"|\$\$[\s\S]*?\$\$"
+    r"|`[^`\n]+`"
+    r"|(?<!\$)\$(?!\$)[^$\n]+(?<!\$)\$(?!\$)"
+)
 
 # Common abbreviations and tokens that should not trigger sentence boundary splits
 RE_ABBREVIATIONS = re.compile(
@@ -151,6 +165,38 @@ class ValidationResult:
     violations: list[LinterViolation] = field(default_factory=list)
 
 
+def transform_prose_outside_protected(
+    text: str,
+    transform: Callable[[str], str],
+) -> str:
+    """Applies a string transformation exclusively to prose outside technical markdown regions.
+
+    Preserves HTML comments, fenced code blocks, inline code, and LaTeX display/inline math
+    byte-for-byte while transforming unprotected prose segments between them.
+
+    Args:
+        text: Raw markdown text to process.
+        transform: Callable applied to each unprotected prose segment.
+
+    Returns:
+        Reassembled markdown string with protected regions intact.
+
+    Raises:
+        None.
+    """
+    parts: list[str] = []
+    last_end = 0
+    for match in RE_PROTECTED_MARKDOWN.finditer(text):
+        start, end = match.span()
+        if start > last_end:
+            parts.append(transform(text[last_end:start]))
+        parts.append(match.group(0))
+        last_end = end
+    if last_end < len(text):
+        parts.append(transform(text[last_end:]))
+    return "".join(parts)
+
+
 def mask_ignored_elements(text: str) -> str:
     """Masks code blocks, inline code, LaTeX math, and HTML comments.
 
@@ -182,23 +228,7 @@ def mask_ignored_elements(text: str) -> str:
         content = match.group(0)
         return "".join("\n" if char == "\n" else " " for char in content)
 
-    # 1. HTML comments: <!-- ... -->
-    masked = re.sub(r"<!--[\s\S]*?-->", blank_match, text)
-
-    # 2. Fenced code blocks: ```...``` or ~~~...~~~
-    masked = re.sub(r"```[\s\S]*?```", blank_match, masked)
-    masked = re.sub(r"~~~[\s\S]*?~~~", blank_match, masked)
-
-    # 3. LaTeX display math: $$...$$
-    masked = re.sub(r"\$\$[\s\S]*?\$\$", blank_match, masked)
-
-    # 4. Inline code: `...`
-    masked = re.sub(r"`[^`\n]+`", blank_match, masked)
-
-    # 5. Inline LaTeX math: $...$
-    masked = re.sub(r"(?<!\$)\$(?!\$)[^$\n]+(?<!\$)\$(?!\$)", blank_match, masked)
-
-    return masked
+    return RE_PROTECTED_MARKDOWN.sub(blank_match, text)
 
 
 def count_sentences(paragraph: str) -> int:
@@ -307,6 +337,20 @@ def validate_markdown_prose(text: str) -> ValidationResult:
             )
         )
 
+    # Check Rule R5: Prohibited double-escaped literal newlines in prose
+    for match in RE_LITERAL_NEWLINE.finditer(masked):
+        violations.append(
+            LinterViolation(
+                rule_id="R5_LITERAL_NEWLINE",
+                message=(
+                    "Sequência literal '\\n' proibida fora de código ou LaTeX. "
+                    "Utilize quebras de linha reais."
+                ),
+                line_number=get_line_number(match.start()),
+                matched_text=match.group(0),
+            )
+        )
+
     # Check Rule R3: Paragraph sentence count
     # Split by two or more newlines to identify paragraphs
     paragraph_matches = list(re.finditer(r"(?:^|\n\n+)([\s\S]+?)(?=\n\n+|$)", masked))
@@ -357,8 +401,11 @@ def validate_markdown_prose(text: str) -> ValidationResult:
 __all__ = [
     "LEXICAL_BLACKLIST",
     "LinterViolation",
+    "RE_LITERAL_NEWLINE",
+    "RE_PROTECTED_MARKDOWN",
     "ValidationResult",
     "count_sentences",
     "mask_ignored_elements",
+    "transform_prose_outside_protected",
     "validate_markdown_prose",
 ]
