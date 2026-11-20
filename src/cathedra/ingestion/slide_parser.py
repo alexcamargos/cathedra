@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from mba_wiki.schemas import SlideChunk
+from cathedra.schemas import SlideChunk
 
 # Regex patterns for detecting LaTeX mathematical formulas
 RE_DISPLAY_LATEX = re.compile(r"\$\$([\s\S]+?)\$\$")

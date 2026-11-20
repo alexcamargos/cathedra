@@ -6,8 +6,8 @@ unstructured course programs into validated Pydantic models, and manages persist
 
 from pathlib import Path
 
-from mba_wiki.agents.llm_client import StructuredLLMClient
-from mba_wiki.schemas import StructuredSyllabus
+from cathedra.agents.llm_client import StructuredLLMClient
+from cathedra.schemas import StructuredSyllabus
 
 DEFAULT_PROMPT_PATH = Path(__file__).parent.parent / "agents" / "prompts" / "syllabus_parser.md"
 

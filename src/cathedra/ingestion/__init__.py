@@ -1,6 +1,6 @@
 """Document and slide ingestion package."""
 
-from mba_wiki.ingestion.slide_parser import (
+from cathedra.ingestion.slide_parser import (
     extract_latex_equations,
     infer_slide_title,
     parse_pdf_slides,
@@ -8,7 +8,7 @@ from mba_wiki.ingestion.slide_parser import (
     parse_slides,
     table_to_markdown,
 )
-from mba_wiki.ingestion.syllabus_parser import (
+from cathedra.ingestion.syllabus_parser import (
     get_syllabus_parser_prompt,
     load_structured_syllabus,
     parse_syllabus,
