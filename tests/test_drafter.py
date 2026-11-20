@@ -103,6 +103,8 @@ def test_format_drafter_user_prompt_structure() -> None:
     assert "Valor Presente Líquido" in prompt
     assert "\\text{VPL}" in prompt
     assert "Linha do tempo de fluxo de caixa." in prompt
+    assert "Bibliografia Recomendada" not in prompt
+    assert "Brealey, Myers" not in prompt
 
 
 def test_generate_draft_with_fake_llm(fake_llm_client: FakeLLMClient) -> None:

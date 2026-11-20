@@ -68,7 +68,6 @@ def format_drafter_user_prompt(
 
     # 2. Syllabus Anchoring Context
     topics_list = "\n".join(f"- {t}" for t in syllabus.topics)
-    bib_list = "\n".join(f"- {b}" for b in syllabus.bibliography)
     prof_info = f"\nProfessor(a): {syllabus.professor}" if syllabus.professor else ""
 
     syllabus_context = (
@@ -76,8 +75,7 @@ def format_drafter_user_prompt(
         f"Disciplina: {syllabus.discipline_name} "
         f"(slug: `{syllabus.discipline_slug}`){prof_info}\n\n"
         f"### Ementa e Objetivos\n{syllabus.syllabus_summary}\n\n"
-        f"### Tópicos Oficiais da Matéria\n{topics_list}\n\n"
-        f"### Bibliografia Recomendada\n{bib_list}"
+        f"### Tópicos Oficiais da Matéria\n{topics_list}"
     )
     sections.append(syllabus_context)
 
