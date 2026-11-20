@@ -320,7 +320,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes comprovando comparacao antes/depois para Zettels modificados, rejeicao de fallback sem `audited_markdown` e ancora original nos retries do Humanizer passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 51: Persistencia Idempotente no Obsidian, Reparo de Zettels e Higiene de Titulos/cross_links
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Limpar marcacao Markdown (`**`, `*`, `_`, `` ` ``) em `infer_slide_title` (`src/cathedra/ingestion/slide_parser.py`), atualizar seletivamente chaves de auditoria no frontmatter de aulas em `src/cathedra/exporters/obsidian_writer.py`, persistir `has_pending_review` nos relatorios JSON, suportar atualizacao controlada de Zettels com `AUTO-CONTENT` e `--force` preservando backlinks/notas, e exportar `cross_links` dentro da pagina de aula.
 - **Arquivos afetados:** `src/cathedra/ingestion/slide_parser.py`, `src/cathedra/exporters/obsidian_writer.py`, `src/cathedra/cli.py`, `tests/test_slide_parser.py`, `tests/test_exporters.py`, `tests/test_cli.py`.
 - **Criterio de aceite:** Testes com `tmp_path` validando atualizacao de `fact_check_status`, reparo de Zettels com `--force`, limpeza de titulos e exportacao idempotente de `cross_links` passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
