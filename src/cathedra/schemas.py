@@ -100,6 +100,74 @@ class AuditClaimsResponse(BaseModel):
     claims: list[ClaimAuditItem] = Field(default_factory=list)
 
 
+class GuardrailIssue(BaseModel):
+    """Schema representing a real factual error or hallucination detected by the guardrail.
+
+    Attributes:
+        claim_id: Unique identifier for the detected deviation.
+        quote: Exact contiguous excerpt from the draft, zettel, or tension.
+        category: Domain classification of the deviation.
+        verdict: Deviation verdict (false, imprecise, misleading, or unsupported).
+        severity: Severity code (S1 to S6) of the deviation.
+        reason: Concise explanation of why the statement is erroneous or hallucinated.
+        proposed_fix: Suggested replacement text for S1/S2/S3/S5, or None for S4 removal.
+    """
+
+    claim_id: str
+    quote: str
+    category: Literal["formula", "date", "attribution", "technical", "metric"]
+    verdict: Literal["false", "imprecise", "misleading", "unsupported"]
+    severity: Literal["S1", "S2", "S3", "S4", "S5", "S6"]
+    reason: str | None = None
+    proposed_fix: str | None = None
+
+    def to_claim_audit_item(self) -> ClaimAuditItem:
+        """Converts this guardrail deviation into a ClaimAuditItem for audit persistence.
+
+        Args:
+            None.
+
+        Returns:
+            ClaimAuditItem populated with the guardrail deviation fields.
+
+        Raises:
+            None.
+        """
+        return ClaimAuditItem(
+            claim_id=self.claim_id,
+            quote=self.quote,
+            category=self.category,
+            verdict=self.verdict,
+            severity=self.severity,
+            evidence_source=self.reason,
+            proposed_fix=self.proposed_fix,
+        )
+
+
+class GuardrailResponse(BaseModel):
+    """Lean guardrail output schema listing only real factual deviations.
+
+    Attributes:
+        issues: List of real factual errors or hallucinations detected (empty when clean).
+    """
+
+    issues: list[GuardrailIssue] = Field(default_factory=list)
+
+    def to_audit_claims_response(self) -> AuditClaimsResponse:
+        """Converts guardrail issues into an AuditClaimsResponse container.
+
+        Args:
+            None.
+
+        Returns:
+            AuditClaimsResponse containing mapped ClaimAuditItem entries.
+
+        Raises:
+            None.
+        """
+        return AuditClaimsResponse(claims=[issue.to_claim_audit_item() for issue in self.issues])
+
+
 class HumanizerResult(BaseModel):
     """Schema representing the outcome of stylistic rewriting and validation.
 
@@ -282,6 +350,7 @@ class LessonAuditReport(BaseModel):
     lesson_title: str
     processed_date: date
     fact_check_passed: bool
+    has_pending_review: bool = False
     total_claims_audited: int
     removed_unsupported_claims: int
     audit_items: list[ClaimAuditItem] = Field(default_factory=list)
@@ -431,6 +500,8 @@ __all__ = [
     "DialecticalTension",
     "DraftResult",
     "FactCheckResult",
+    "GuardrailIssue",
+    "GuardrailResponse",
     "HumanizerResult",
     "LessonAuditReport",
     "LessonPipelineState",

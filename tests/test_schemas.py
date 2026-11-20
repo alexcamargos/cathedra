@@ -17,6 +17,8 @@ from cathedra.schemas import (
     DialecticalTension,
     DraftResult,
     FactCheckResult,
+    GuardrailIssue,
+    GuardrailResponse,
     HumanizerResult,
     LessonAuditReport,
     LessonPipelineState,
@@ -1007,3 +1009,98 @@ def test_wiki_lesson_output_with_transcript_filename() -> None:
     dumped = output.model_dump()
     restored = WikiLessonOutput.model_validate(dumped)
     assert restored.source_transcript_filename == "aula_01.mp4"
+
+
+def test_guardrail_issue_rejects_verified_and_maps_to_claim_audit_item() -> None:
+    """Tests that GuardrailIssue rejects verified verdicts and maps cleanly to ClaimAuditItem.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    with pytest.raises(ValidationError):
+        GuardrailIssue.model_validate(
+            {
+                "claim_id": "G1",
+                "quote": "A média é a soma sobre n.",
+                "category": "formula",
+                "verdict": "verified",
+                "severity": "S6",
+            }
+        )
+
+    issue = GuardrailIssue(
+        claim_id="G1",
+        quote="A variância divide por n + 1.",
+        category="formula",
+        verdict="false",
+        severity="S1",
+        reason="Fórmula incorreta para variância amostral.",
+        proposed_fix="A variância amostral divide por n - 1.",
+    )
+    mapped = issue.to_claim_audit_item()
+    assert mapped.claim_id == "G1"
+    assert mapped.verdict == "false"
+    assert mapped.severity == "S1"
+    assert mapped.evidence_source == "Fórmula incorreta para variância amostral."
+    assert mapped.proposed_fix == "A variância amostral divide por n - 1."
+
+
+def test_guardrail_response_schema_excludes_citation_locator_fields() -> None:
+    """Tests that GuardrailResponse JSON schema omits citation-locator fields.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    schema = GuardrailResponse.model_json_schema()
+    issue_schema = schema["$defs"]["GuardrailIssue"]
+    issue_props = issue_schema["properties"]
+    assert "evidence_kind" not in issue_props
+    assert "evidence_locator" not in issue_props
+    assert "evidence_quote" not in issue_props
+    assert "evidence_status" not in issue_props
+    assert "verified" not in issue_schema["properties"]["verdict"]["enum"]
+    assert "verified" not in str(schema)
+
+    empty = GuardrailResponse()
+    assert empty.issues == []
+    assert empty.to_audit_claims_response().claims == []
+
+
+def test_lesson_audit_report_supports_has_pending_review() -> None:
+    """Tests that LessonAuditReport persists has_pending_review with False default.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    report = LessonAuditReport(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        lesson_number=1,
+        lesson_title="Introdução",
+        processed_date=date(2026, 11, 20),
+        fact_check_passed=True,
+        has_pending_review=True,
+        total_claims_audited=1,
+        removed_unsupported_claims=0,
+        audit_items=[],
+    )
+    restored = LessonAuditReport.model_validate_json(report.model_dump_json())
+    assert restored.has_pending_review is True
