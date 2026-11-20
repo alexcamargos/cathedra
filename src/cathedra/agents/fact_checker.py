@@ -15,6 +15,7 @@ from cathedra.schemas import (
     ClaimAuditItem,
     DialecticalTension,
     FactCheckResult,
+    GuardrailResponse,
     LessonPipelineState,
     SlideChunk,
     SyllabusModule,
@@ -89,15 +90,13 @@ def format_fact_checker_user_prompt(
     """
     sections: list[str] = []
 
-    # 1. Official Course Guidelines
-    bib_list = "\n".join(f"- {b}" for b in syllabus.bibliography)
+    # 1. Official Course Guidelines (scope only; bibliography is intentionally omitted)
     topics_list = "\n".join(f"- {t}" for t in syllabus.topics)
     syllabus_sec = (
-        f"## Fonte 1: Ementa estruturada e lista bibliográfica não consultada\n"
+        f"## Fonte 1: Escopo Curricular da Disciplina\n"
         f"Disciplina: {syllabus.discipline_name} (slug: `{syllabus.discipline_slug}`)\n\n"
         f"### Resumo da Ementa\n{syllabus.syllabus_summary}\n\n"
-        f"### Tópicos Curriculares\n{topics_list}\n\n"
-        f"### Bibliografia de Referência\n{bib_list}"
+        f"### Tópicos Curriculares\n{topics_list}"
     )
     sections.append(syllabus_sec)
 
@@ -355,8 +354,8 @@ def apply_audit_remediations(
                 # Critical factual error or logic fallacy without fix is a blocker
                 has_unresolved_blockers = True
             elif item.verdict == "imprecise" or item.severity == "S2":
-                # Imprecise claim without fix is an unresolved issue
-                has_unresolved_blockers = True
+                # Guardrail mode: S2 observation without a proposed fix is logged without blocking
+                continue
 
     # Normalize whitespace and spacing before punctuation
     cleaned_text = re.sub(r"[ \t]+", " ", audited_text)
@@ -485,20 +484,97 @@ def filter_and_remediate_tensions(
     return validated, removed_count, has_blockers
 
 
+def _matches_any_zettel(zettels: list[AtomicZettel] | None, quote: str) -> bool:
+    """Checks whether a claim quote matches the title or body of any atomic zettel.
+
+    Args:
+        zettels: Optional list of AtomicZettel instances to inspect.
+        quote: Claim quote string to search for.
+
+    Returns:
+        True if any zettel matches the quote, False otherwise.
+
+    Raises:
+        None.
+    """
+    for zettel in zettels or []:
+        _, matches_content = locate_and_apply_remediation(zettel.content_markdown, quote)
+        _, matches_title = locate_and_apply_remediation(zettel.title, quote)
+        if matches_content or matches_title:
+            return True
+    return False
+
+
+def _matches_any_tension(tensions: list[DialecticalTension] | None, quote: str) -> bool:
+    """Checks whether a claim quote matches any textual field of a dialectical tension.
+
+    Args:
+        tensions: Optional list of DialecticalTension instances to inspect.
+        quote: Claim quote string to search for.
+
+    Returns:
+        True if any tension matches the quote, False otherwise.
+
+    Raises:
+        None.
+    """
+    for tension in tensions or []:
+        combined = (
+            f"{tension.title} {tension.pole_a_framework} {tension.pole_a_thesis} "
+            f"{tension.pole_b_framework} {tension.pole_b_thesis} {tension.synthesis_guidelines}"
+        )
+        _, matches = locate_and_apply_remediation(combined, quote)
+        if matches:
+            return True
+    return False
+
+
 def _has_unresolved_critical_claims(
     claims: list[ClaimAuditItem],
     draft_text: str,
     audited_markdown: str,
+    original_zettels: list[AtomicZettel] | None = None,
+    valid_zettels: list[AtomicZettel] | None = None,
+    original_tensions: list[DialecticalTension] | None = None,
+    valid_tensions: list[DialecticalTension] | None = None,
 ) -> bool:
-    """Checks whether any critical S1/S5/false claim remained unresolved after remediation."""
+    """Checks whether any critical S1/S5/false claim remained unresolved across all artifacts.
+
+    Inspects draft prose, zettels, tensions, and orphan claims (quotes not found anywhere)
+    so tolerant publication modes cannot bypass unresolved critical factual errors.
+
+    Args:
+        claims: Complete list of audited claims produced by the guardrail.
+        draft_text: Original unedited lesson draft prose.
+        audited_markdown: Remediated lesson prose after applying fixes.
+        original_zettels: Candidate zettels prior to filtering/remediation.
+        valid_zettels: Surviving zettels after filtering/remediation.
+        original_tensions: Candidate tensions prior to filtering.
+        valid_tensions: Surviving tensions after filtering.
+
+    Returns:
+        True if at least one critical S1/S5/false claim remained unresolved.
+
+    Raises:
+        None.
+    """
     for item in claims:
         if item.verdict != "false" and item.severity not in ("S1", "S5"):
             continue
-        if not item.proposed_fix:
-            return True
-        _, still_in_draft = locate_and_apply_remediation(audited_markdown, item.quote)
         _, was_in_draft = locate_and_apply_remediation(draft_text, item.quote)
-        if was_in_draft and still_in_draft:
+        was_in_zettel = _matches_any_zettel(original_zettels, item.quote)
+        was_in_tension = _matches_any_tension(original_tensions, item.quote)
+        if not (was_in_draft or was_in_zettel or was_in_tension):
+            return True
+        if was_in_draft:
+            if not item.proposed_fix:
+                return True
+            _, still_in_draft = locate_and_apply_remediation(audited_markdown, item.quote)
+            if still_in_draft:
+                return True
+        if was_in_zettel and _matches_any_zettel(valid_zettels, item.quote):
+            return True
+        if was_in_tension and _matches_any_tension(valid_tensions, item.quote):
             return True
     return False
 
@@ -512,9 +588,28 @@ def _evaluate_audit_claims(
     tensions: list[DialecticalTension] | None,
     transcript: VideoTranscript | None,
     allow_pending_review: bool = False,
-) -> tuple[FactCheckResult, list[str]]:
-    """Evaluates raw auditor claims deterministically and identifies repairable slips."""
-    repair_reasons: list[str] = []
+) -> FactCheckResult:
+    """Evaluates guardrail deviations deterministically without mutating caller inputs.
+
+    Args:
+        response: Mapped AuditClaimsResponse containing deviations from the guardrail.
+        draft_text: Preliminary lesson draft prose to remediate.
+        slides: Primary source slide chunks.
+        syllabus: Anchoring syllabus module.
+        zettels: Optional candidate atomic zettels to filter/remediate.
+        tensions: Optional candidate dialectical tensions to filter.
+        transcript: Optional consolidated lecture speech transcript.
+        allow_pending_review: Whether non-critical unresolved items may pass with flag.
+
+    Returns:
+        Consolidated FactCheckResult with remediated markdown and validated artifacts.
+
+    Raises:
+        None.
+    """
+    working_zettels = [z.model_copy(deep=True) for z in zettels] if zettels else []
+    working_tensions = [t.model_copy(deep=True) for t in tensions] if tensions else []
+
     for item in response.claims:
         item.evidence_status = "pending_review"
         if item.verdict == "verified":
@@ -532,37 +627,20 @@ def _evaluate_audit_claims(
             draft_claims.append(item)
             continue
 
-        matched_in_secondary = False
-        for z in zettels or []:
-            _, m_c = locate_and_apply_remediation(z.content_markdown, item.quote)
-            _, m_t = locate_and_apply_remediation(z.title, item.quote)
-            if m_c or m_t:
-                matched_in_secondary = True
-                break
-
-        if not matched_in_secondary:
-            for t in tensions or []:
-                combined_t = (
-                    f"{t.title} {t.pole_a_framework} {t.pole_a_thesis} "
-                    f"{t.pole_b_framework} {t.pole_b_thesis} {t.synthesis_guidelines}"
-                )
-                _, m_tens = locate_and_apply_remediation(combined_t, item.quote)
-                if m_tens:
-                    matched_in_secondary = True
-                    break
+        matched_in_secondary = _matches_any_zettel(
+            working_zettels, item.quote
+        ) or _matches_any_tension(working_tensions, item.quote)
 
         is_blocking_item = (
-            item.severity != "S6" or item.verdict in ("false", "unsupported", "misleading")
-        ) and (
-            item.verdict in ("unsupported", "false", "misleading", "imprecise")
-            or item.severity in ("S1", "S2", "S3", "S4", "S5")
+            item.verdict in ("unsupported", "false", "misleading")
+            or item.severity in ("S1", "S3", "S4", "S5")
+            or (
+                (item.verdict == "imprecise" or item.severity == "S2")
+                and item.proposed_fix is not None
+            )
         )
         if not matched_in_secondary and is_blocking_item:
             has_orphan_blockers = True
-            repair_reasons.append(
-                f"{item.claim_id}: quote não localizado literalmente no rascunho "
-                "nem em Zettels/tensões."
-            )
 
     audited_markdown, removed_count_draft, draft_passed = apply_audit_remediations(
         raw_text=draft_text,
@@ -572,18 +650,18 @@ def _evaluate_audit_claims(
     valid_zettels: list[AtomicZettel] = []
     removed_count_zettels = 0
     zettels_blockers = False
-    if zettels:
+    if working_zettels:
         valid_zettels, removed_count_zettels, zettels_blockers = filter_and_remediate_zettels(
-            zettels=zettels,
+            zettels=working_zettels,
             audit_items=response.claims,
         )
 
     valid_tensions: list[DialecticalTension] = []
     removed_count_tensions = 0
     tensions_blockers = False
-    if tensions:
+    if working_tensions:
         valid_tensions, removed_count_tensions, tensions_blockers = filter_and_remediate_tensions(
-            tensions=tensions,
+            tensions=working_tensions,
             audit_items=response.claims,
         )
 
@@ -592,9 +670,13 @@ def _evaluate_audit_claims(
         draft_passed and not zettels_blockers and not tensions_blockers and not has_orphan_blockers
     )
     has_critical = _has_unresolved_critical_claims(
-        claims=draft_claims,
+        claims=response.claims,
         draft_text=draft_text,
         audited_markdown=audited_markdown,
+        original_zettels=zettels,
+        valid_zettels=valid_zettels,
+        original_tensions=tensions,
+        valid_tensions=valid_tensions,
     )
     if allow_pending_review and not strict_passed and not has_critical:
         overall_passed = True
@@ -603,7 +685,7 @@ def _evaluate_audit_claims(
         overall_passed = strict_passed
         has_pending_review = False
 
-    result = FactCheckResult(
+    return FactCheckResult(
         audit_items=list(response.claims),
         fact_check_passed=overall_passed,
         has_pending_review=has_pending_review,
@@ -612,7 +694,6 @@ def _evaluate_audit_claims(
         validated_zettels=valid_zettels,
         validated_tensions=valid_tensions,
     )
-    return result, repair_reasons
 
 
 def audit_lesson_draft(
@@ -624,21 +705,20 @@ def audit_lesson_draft(
     zettels: list[AtomicZettel] | None = None,
     tensions: list[DialecticalTension] | None = None,
     transcript: VideoTranscript | None = None,
-    max_repair_attempts: int = 0,
     allow_pending_review: bool = False,
 ) -> FactCheckResult:
-    """Performs adversarial factual audit on lesson draft text using StructuredLLMClient.
+    """Performs single-pass anti-hallucination guardrail audit on lesson draft artifacts.
 
     Args:
         draft_text: Lesson draft prose to audit.
         slides: Primary source slide chunks.
         syllabus: Anchoring syllabus module.
         client: Implementation conforming to StructuredLLMClient protocol.
-        prompt: Optional system prompt override. Defaults to loaded prompt.
+        prompt: Optional system prompt override. Defaults to loaded guardrail prompt.
         zettels: Optional candidate atomic zettels to audit.
         tensions: Optional candidate dialectical tensions to audit.
         transcript: Optional consolidated speech transcript of the recorded lecture.
-        max_repair_attempts: Optional repair retries when evidence locators or quotes fail.
+        allow_pending_review: Whether non-critical unresolved items may pass with flag.
 
     Returns:
         FactCheckResult containing audit items, status, remediated text, and validated collections.
@@ -647,7 +727,7 @@ def audit_lesson_draft(
         Exception: If LLM call or schema validation fails.
     """
     system_prompt = prompt or get_fact_checker_prompt()
-    base_user_prompt = format_fact_checker_user_prompt(
+    user_prompt = format_fact_checker_user_prompt(
         draft_text=draft_text,
         slides=slides,
         syllabus=syllabus,
@@ -656,53 +736,22 @@ def audit_lesson_draft(
         transcript=transcript,
     )
 
-    current_prompt = base_user_prompt
-    best_result: FactCheckResult | None = None
-    for attempt in range(max_repair_attempts + 1):
-        response: AuditClaimsResponse = client.generate_structured(
-            system_prompt=system_prompt,
-            user_prompt=current_prompt,
-            response_model=AuditClaimsResponse,
-        )
-        result, repair_reasons = _evaluate_audit_claims(
-            response=response,
-            draft_text=draft_text,
-            slides=slides,
-            syllabus=syllabus,
-            zettels=zettels,
-            tensions=tensions,
-            transcript=transcript,
-            allow_pending_review=allow_pending_review,
-        )
-        if (
-            best_result is None
-            or (result.fact_check_passed and not result.has_pending_review)
-            or (result.fact_check_passed and not best_result.fact_check_passed)
-            or (
-                len(result.audit_items) >= len(best_result.audit_items)
-                and result.fact_check_passed == best_result.fact_check_passed
-            )
-        ):
-            best_result = result
-        if (
-            (result.fact_check_passed and not result.has_pending_review)
-            or not repair_reasons
-            or attempt >= max_repair_attempts
-        ):
-            return best_result
-        repair_notes = "\n".join(f"- {reason}" for reason in repair_reasons)
-        current_prompt = (
-            f"{base_user_prompt}\n\n"
-            "## Reparo Obrigatório da Auditoria Anterior\n"
-            "Corrija exclusivamente as falhas estruturais abaixo na resposta JSON:\n"
-            f"{repair_notes}\n"
-            "Para todo item 'verified', informe evidence_kind, evidence_locator e evidence_quote "
-            "literal da fonte. Para todo item reprovado, extraia em quote o trecho literal exato "
-            "e contíguo do texto auditado."
-        )
-
-    assert best_result is not None
-    return best_result
+    guardrail_response: GuardrailResponse = client.generate_structured(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_model=GuardrailResponse,
+    )
+    response = guardrail_response.to_audit_claims_response()
+    return _evaluate_audit_claims(
+        response=response,
+        draft_text=draft_text,
+        slides=slides,
+        syllabus=syllabus,
+        zettels=zettels,
+        tensions=tensions,
+        transcript=transcript,
+        allow_pending_review=allow_pending_review,
+    )
 
 
 def audit_humanized_invariance(
@@ -776,19 +825,18 @@ def audit_humanized_invariance(
 def fact_check_node(
     state: LessonPipelineState,
     client: StructuredLLMClient,
-    max_repair_attempts: int = 1,
     allow_pending_review: bool = False,
 ) -> LessonPipelineState:
-    """Graph node executor for the fact-checking stage within the lesson pipeline.
+    """Graph node executor for the anti-hallucination guardrail stage in the lesson pipeline.
 
     Audits state.raw_draft, state.extracted_zettels, and state.detected_tensions
-    against slides and syllabus, updates audit_items, prunes ungrounded entities,
-    and updates pipeline state with validated outputs.
+    against slides and lecture transcript in a single pass, updates audit_items,
+    prunes ungrounded entities, and updates pipeline state with validated outputs.
 
     Args:
         state: Pipeline state prior to factual auditing.
         client: Structured LLM client implementation.
-        max_repair_attempts: Maximum repair retries for missing locators or unlocated quotes.
+        allow_pending_review: Whether non-critical unresolved items may pass with flag.
 
     Returns:
         Updated LessonPipelineState containing factual audit results.
@@ -805,7 +853,6 @@ def fact_check_node(
         zettels=state.extracted_zettels,
         tensions=state.detected_tensions,
         transcript=state.transcript,
-        max_repair_attempts=max_repair_attempts,
         allow_pending_review=allow_pending_review,
     )
 

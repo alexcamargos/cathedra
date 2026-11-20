@@ -21,6 +21,8 @@ from cathedra.schemas import (
     ClaimAuditItem,
     DialecticalTension,
     FactCheckResult,
+    GuardrailIssue,
+    GuardrailResponse,
     LessonPipelineState,
     SlideChunk,
     SyllabusModule,
@@ -45,6 +47,8 @@ def test_verified_claim_requires_located_material_evidence(
     expected: bool,
 ) -> None:
     """An LLM verdict or an unconsulted book title alone cannot establish support."""
+    from cathedra.agents.fact_checker import locate_evidence_source
+
     syllabus = SyllabusModule(
         discipline_slug="financas",
         discipline_name="Finanças",
@@ -65,23 +69,20 @@ def test_verified_claim_requires_located_material_evidence(
             "evidence_status": "material_supported",
         }
     )
-    client = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[claim])])
-    result = audit_lesson_draft(
-        draft_text="A taxa é 10%.",
+    source = locate_evidence_source(
+        item=claim,
         slides=[SlideChunk(slide_number=1, title="Taxa", raw_text="A taxa é 10%.")],
         syllabus=syllabus,
-        client=client,
+        transcript=None,
     )
-    item = result.audit_items[0]
-    assert result.fact_check_passed is True
-    assert item.evidence_status == ("material_supported" if expected else "pending_review")
-    assert item.evidence_source == ("Slide 1" if expected else None)
+    assert source == ("Slide 1" if expected else None)
 
 
 def test_transcript_evidence_identifies_segment_and_timestamps() -> None:
     """A matching transcript excerpt is traceable without implying independent confirmation."""
     from datetime import UTC, datetime
 
+    from cathedra.agents.fact_checker import locate_evidence_source
     from cathedra.schemas import TranscriptSegment, VideoTranscript
 
     syllabus = SyllabusModule(
@@ -120,19 +121,20 @@ def test_transcript_evidence_identifies_segment_and_timestamps() -> None:
             "evidence_quote": "A taxa é 10%.",
         }
     )
-    client = FakeLLMClient(structured_responses=[AuditClaimsResponse(claims=[claim])])
-    result = audit_lesson_draft(
+    source = locate_evidence_source(
+        item=claim,
+        slides=[],
+        syllabus=syllabus,
+        transcript=transcript,
+    )
+    assert source == "Transcrição aula.mp4, segmento 7 (12.0s–16.0s)"
+    prompt = format_fact_checker_user_prompt(
         draft_text="A taxa é 10%.",
         slides=[],
         syllabus=syllabus,
-        client=client,
         transcript=transcript,
     )
-    assert result.fact_check_passed
-    assert result.audit_items[0].evidence_status == "material_supported"
-    assert result.audit_items[0].evidence_source == "Transcrição aula.mp4, segmento 7 (12.0s–16.0s)"
-    assert client.last_call is not None
-    assert "[7] a taxa é 10%." in client.last_call.user_prompt.lower()
+    assert "[7] a taxa é 10%." in prompt.lower()
 
 
 def test_get_fact_checker_prompt_loads_from_markdown() -> None:
@@ -209,7 +211,8 @@ def test_format_fact_checker_user_prompt() -> None:
     )
 
     assert "Finanças Corporativas" in user_prompt
-    assert "Brealey, Myers" in user_prompt
+    assert "Brealey, Myers" not in user_prompt
+    assert "Bibliografia de Referência" not in user_prompt
     assert "Valor Presente Líquido" in user_prompt
     assert "Aceitar se VPL > 0." in user_prompt
     assert draft_text in user_prompt
@@ -349,25 +352,15 @@ def test_audit_lesson_draft_with_fake_llm(fake_llm_client: FakeLLMClient) -> Non
         "A empresa XYZ obteve retorno de 900% garantido pelo governo em 1910."
     )
 
-    verified_item = ClaimAuditItem(
-        claim_id="claim-01",
-        quote="O VPL é uma ferramenta confiável.",
-        category="technical",
-        verdict="verified",
-        evidence_kind="slide",
-        evidence_locator=1,
-        evidence_quote="O VPL é uma ferramenta confiável.",
-    )
-    unsupported_item = ClaimAuditItem(
+    unsupported_issue = GuardrailIssue(
         claim_id="claim-02",
         quote="A empresa XYZ obteve retorno de 900% garantido pelo governo em 1910.",
         category="metric",
         verdict="unsupported",
         severity="S4",
+        reason="Exemplo empírico inventado ausente dos slides e da aula.",
     )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(claims=[verified_item, unsupported_item])
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[unsupported_issue]))
 
     result = audit_lesson_draft(
         draft_text=draft_text,
@@ -377,7 +370,9 @@ def test_audit_lesson_draft_with_fake_llm(fake_llm_client: FakeLLMClient) -> Non
     )
 
     assert isinstance(result, FactCheckResult)
-    assert len(result.audit_items) == 2
+    assert fake_llm_client.last_call is not None
+    assert fake_llm_client.last_call.response_model is GuardrailResponse
+    assert len(result.audit_items) == 1
     assert result.removed_unsupported_claims == 1
     assert result.fact_check_passed is True
     assert "XYZ" not in result.audited_markdown
@@ -427,27 +422,19 @@ def test_fact_check_node_updates_pipeline_state(fake_llm_client: FakeLLMClient) 
         raw_draft=raw_draft,
     )
 
-    claim_ok = ClaimAuditItem(
-        claim_id="c1",
-        quote="O VPL desconta fluxos à taxa de custo de capital.",
-        category="technical",
-        verdict="verified",
-        evidence_kind="slide",
-        evidence_locator=1,
-        evidence_quote="O VPL desconta fluxos à taxa de custo de capital.",
-    )
-    claim_dragons = ClaimAuditItem(
+    issue_dragons = GuardrailIssue(
         claim_id="c2",
         quote="Segundo lendas medievais, dragões financiavam reis com taxas Selic negativas.",
         category="attribution",
         verdict="unsupported",
         severity="S4",
+        reason="Alucinação evidente sem base na aula.",
     )
-    fake_llm_client.add_structured_response(AuditClaimsResponse(claims=[claim_ok, claim_dragons]))
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[issue_dragons]))
 
     updated_state = fact_check_node(state=state, client=fake_llm_client)
 
-    assert len(updated_state.audit_items) == 2
+    assert len(updated_state.audit_items) == 1
     assert updated_state.removed_unsupported_claims == 1
     assert updated_state.fact_check_passed is True
     assert updated_state.audited_markdown is not None
@@ -706,7 +693,8 @@ def test_format_fact_checker_user_prompt_includes_zettels_and_tensions() -> None
         tensions=[tension],
     )
 
-    assert "## Fonte 1: Ementa estruturada e lista bibliográfica não consultada" in prompt
+    assert "## Fonte 1: Escopo Curricular da Disciplina" in prompt
+    assert "Brealey" not in prompt
     assert "## Fonte 2: Conteúdo Literal dos Slides da Aula" in prompt
     assert "## Rascunho da Aula a ser Auditado" in prompt
     assert "## Conceitos Atômicos (Zettels) a serem Auditados" in prompt
@@ -787,33 +775,22 @@ def test_fact_check_node_purges_unsupported_zettels_and_tensions(
     )
 
     # Auditor flags hallucinated zettel and hallucinated tension as unsupported (S4)
-    claim_zettel = ClaimAuditItem(
+    issue_zettel = GuardrailIssue(
         claim_id="claim-zettel-s4",
         quote="Isaac Newton descobriu a fórmula do WACC através de alquimia medieval",
         category="attribution",
         verdict="unsupported",
         severity="S4",
     )
-    claim_tension = ClaimAuditItem(
+    issue_tension = GuardrailIssue(
         claim_id="claim-tension-s4",
         quote="Alquimia Hermética",
         category="technical",
         verdict="unsupported",
         severity="S4",
     )
-    claim_draft_valid = ClaimAuditItem(
-        claim_id="claim-draft-ok",
-        quote="O VPL desconta fluxos à taxa de custo de capital.",
-        category="technical",
-        verdict="verified",
-        evidence_kind="slide",
-        evidence_locator=1,
-        evidence_quote="O VPL desconta fluxos à taxa de custo de capital.",
-    )
 
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(claims=[claim_draft_valid, claim_zettel, claim_tension])
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[issue_zettel, issue_tension]))
 
     updated_state = fact_check_node(state=state, client=fake_llm_client)
 
@@ -824,7 +801,7 @@ def test_fact_check_node_purges_unsupported_zettels_and_tensions(
     assert not any(z.slug == "alquimia-financeira" for z in updated_state.extracted_zettels)
     assert len(updated_state.detected_tensions) == 0
     # Audit items recorded
-    assert len(updated_state.audit_items) == 3
+    assert len(updated_state.audit_items) == 2
     assert updated_state.removed_unsupported_claims >= 2
     assert updated_state.fact_check_passed is True
 
@@ -927,20 +904,7 @@ def test_fact_check_node_transmits_state_transcript(fake_llm_client: FakeLLMClie
         transcript=transcript,
     )
 
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
-                    claim_id="claim-1",
-                    quote="Na aula foi discutido o caso real da fusão Ambev em 1999.",
-                    category="technical",
-                    verdict="verified",
-                    evidence_kind="transcript",
-                    evidence_quote="O professor mencionou o caso real da fusão Ambev em 1999.",
-                )
-            ]
-        )
-    )
+    fake_llm_client.add_structured_response(GuardrailResponse(issues=[]))
 
     fact_check_node(state=state, client=fake_llm_client)
 
@@ -1063,10 +1027,10 @@ def test_format_fact_checker_user_prompt_compacts_segments_without_duplication()
     assert "texto limpo completo unico" not in prompt
 
 
-def test_audit_lesson_draft_repairs_missing_evidence_locator_on_retry(
+def test_audit_lesson_draft_runs_single_pass_without_hidden_repair_loop(
     fake_llm_client: FakeLLMClient,
 ) -> None:
-    """Recovers on the single repair attempt when first response has an unlocated S4 quote."""
+    """Guardrail executes strictly in a single LLM pass without a hidden repair loop."""
     syllabus = SyllabusModule(
         discipline_slug="estatistica",
         discipline_name="Estatística",
@@ -1077,44 +1041,30 @@ def test_audit_lesson_draft_repairs_missing_evidence_locator_on_retry(
     slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
 
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="C01",
                     quote="Frase parafraseada que não casa.",
                     category="technical",
                     verdict="unsupported",
                     severity="S4",
-                )
-            ]
-        )
-    )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
-                    claim_id="C01",
-                    quote="Exemplo inventado.",
-                    category="technical",
-                    verdict="unsupported",
-                    severity="S4",
+                    reason="Alucinação não localizada literalmente.",
                 )
             ]
         )
     )
 
     result = audit_lesson_draft(
-        draft_text="A média é a soma sobre n. Exemplo inventado.",
+        draft_text="A média é a soma sobre n.",
         slides=slides,
         syllabus=syllabus,
         client=fake_llm_client,
-        max_repair_attempts=1,
     )
 
-    assert result.fact_check_passed is True
-    assert result.removed_unsupported_claims == 1
-    assert len(fake_llm_client.calls) == 2
-    assert "Reparo Obrigatório" in fake_llm_client.calls[1].user_prompt
+    assert result.fact_check_passed is False
+    assert len(fake_llm_client.calls) == 1
+    assert fake_llm_client.calls[0].response_model is GuardrailResponse
 
 
 def test_apply_audit_remediations_treats_s6_as_non_blocking() -> None:
@@ -1169,71 +1119,102 @@ def test_audit_humanized_invariance_blocks_distortion(
     assert blocked.fact_check_passed is False
 
 
-def test_audit_lesson_draft_preserves_richer_first_result_if_repair_collapses(
+def test_audit_lesson_draft_does_not_mutate_input_zettels_in_place(
     fake_llm_client: FakeLLMClient,
 ) -> None:
-    """Preserves full first audit if repair retry collapses to fewer items."""
+    """Guardrail remediation operates on defensive copies without mutating caller zettels."""
     syllabus = SyllabusModule(
         discipline_slug="estatistica",
         discipline_name="Estatística",
         syllabus_summary="Resumo.",
-        topics=["Média"],
+        topics=["Variância"],
         bibliography=[],
     )
-    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+    slides = [SlideChunk(slide_number=1, title="Variância", raw_text="Divide por n - 1.")]
+    original_zettel = AtomicZettel(
+        slug="variancia-amostral",
+        title="Variância Amostral",
+        domain_tags=["estatistica"],
+        content_markdown="A variância amostral divide por n + 1.",
+        related_links=[],
+    )
 
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="C01",
-                    quote="A média é a soma sobre n.",
-                    category="technical",
-                    verdict="verified",
-                    evidence_kind="slide",
-                    evidence_locator=1,
-                    evidence_quote="A média é a soma sobre n.",
-                ),
-                ClaimAuditItem(
-                    claim_id="C02",
-                    quote="Trecho órfão não localizado.",
-                    category="technical",
-                    verdict="unsupported",
-                    severity="S4",
-                ),
-            ]
-        )
-    )
-    fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
-                    claim_id="C01",
-                    quote="Outro trecho órfão.",
-                    category="technical",
-                    verdict="unsupported",
-                    severity="S4",
+                    quote="A variância amostral divide por n + 1.",
+                    category="formula",
+                    verdict="false",
+                    severity="S1",
+                    proposed_fix="A variância amostral divide por n - 1.",
                 )
             ]
         )
     )
 
     result = audit_lesson_draft(
-        draft_text="A média é a soma sobre n. Outra frase.",
+        draft_text="Texto limpo da aula.",
         slides=slides,
         syllabus=syllabus,
         client=fake_llm_client,
-        max_repair_attempts=1,
+        zettels=[original_zettel],
     )
 
-    assert result.fact_check_passed is False
-    assert len(result.audit_items) == 2
+    assert result.fact_check_passed is True
+    assert result.validated_zettels[0].content_markdown == "A variância amostral divide por n - 1."
+    assert original_zettel.content_markdown == "A variância amostral divide por n + 1."
+
+
+def test_audit_lesson_draft_allows_imprecise_s2_without_fix_as_non_blocking(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """An S2 imprecise observation without a proposed_fix does not hard-block the lesson."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Desvio Padrão"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Dispersão", raw_text="S = raiz da variância.")]
+    draft = (
+        "É a raiz quadrada da variância, retornando à unidade original da variável "
+        "e facilitando a interpretação gerencial."
+    )
+
+    fake_llm_client.add_structured_response(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
+                    claim_id="C33",
+                    quote=draft,
+                    category="technical",
+                    verdict="imprecise",
+                    severity="S2",
+                    reason="Observação didática sem correção sugerida.",
+                    proposed_fix=None,
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text=draft,
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+    )
+
+    assert result.fact_check_passed is True
+    assert len(result.audit_items) == 1
 
 
 def test_audit_lesson_draft_allow_pending_review_passes_non_critical(
     fake_llm_client: FakeLLMClient,
 ) -> None:
-    """With allow_pending_review=True, non-critical S2/S4 pending items pass with flag."""
+    """With allow_pending_review=True, non-critical orphan S4 items pass with pending flag."""
     syllabus = SyllabusModule(
         discipline_slug="estatistica",
         discipline_name="Estatística",
@@ -1244,9 +1225,9 @@ def test_audit_lesson_draft_allow_pending_review_passes_non_critical(
     slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
 
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="C01",
                     quote="Trecho não localizado para remoção.",
                     category="technical",
@@ -1283,9 +1264,9 @@ def test_audit_lesson_draft_allow_pending_review_still_blocks_s1(
     slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
 
     fake_llm_client.add_structured_response(
-        AuditClaimsResponse(
-            claims=[
-                ClaimAuditItem(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
                     claim_id="C01",
                     quote="A média é sempre zero.",
                     category="technical",
@@ -1298,6 +1279,46 @@ def test_audit_lesson_draft_allow_pending_review_still_blocks_s1(
 
     result = audit_lesson_draft(
         draft_text="A média é sempre zero.",
+        slides=slides,
+        syllabus=syllabus,
+        client=fake_llm_client,
+        allow_pending_review=True,
+    )
+
+    assert result.fact_check_passed is False
+    assert result.has_pending_review is False
+
+
+def test_audit_lesson_draft_allow_pending_review_blocks_orphan_s1_and_s5(
+    fake_llm_client: FakeLLMClient,
+) -> None:
+    """Orphan S1/S5 critical errors block even with allow_pending_review=True."""
+    syllabus = SyllabusModule(
+        discipline_slug="estatistica",
+        discipline_name="Estatística",
+        syllabus_summary="Resumo.",
+        topics=["Média"],
+        bibliography=[],
+    )
+    slides = [SlideChunk(slide_number=1, title="Média", raw_text="A média é a soma sobre n.")]
+
+    fake_llm_client.add_structured_response(
+        GuardrailResponse(
+            issues=[
+                GuardrailIssue(
+                    claim_id="C-ORPHAN",
+                    quote="Trecho crítico S1 parafraseado que não casa literalmente.",
+                    category="formula",
+                    verdict="false",
+                    severity="S1",
+                    reason="Fórmula invertida no rascunho.",
+                )
+            ]
+        )
+    )
+
+    result = audit_lesson_draft(
+        draft_text="A média é a soma sobre n.",
         slides=slides,
         syllabus=syllabus,
         client=fake_llm_client,
