@@ -249,7 +249,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes unitarios e de CLI cobrindo `--dry-run`, correcao de `discipline_slug` legado, extracao de `lesson_number`, preservacao de `checkpoint` e relato de ambiguidades passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 40: Execucao sequencial por disciplina na ordem da ementa e das aulas
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Implementar o comando `build-discipline` em `src/mba_wiki/cli.py` para processar todas as aulas de uma disciplina (ou todas as disciplinas na ordem exata de `ementa_estruturada.json` via `--all`), descobrindo slides ordenados por numero de aula, vinculando automaticamente as transcricoes ja normalizadas e interrompendo com seguranca diante de bloqueios factuais (`FactCheckBlockedError`).
 - **Arquivos afetados:** `src/mba_wiki/cli.py`, `tests/test_cli.py`, `docs/SPEC.md`, `README.md`.
 - **Criterio de aceite:** Testes com `CliRunner` e mocks comprovando a ordenacao pela ementa/numero de aula, vinculo automatico de transcricoes e interrupcao segura em bloqueio factual passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
