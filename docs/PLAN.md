@@ -326,7 +326,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes com `tmp_path` validando atualizacao de `fact_check_status`, reparo de Zettels com `--force`, limpeza de titulos e exportacao idempotente de `cross_links` passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 52: Calibragem de Falsos Positivos no Linter e Sincronizacao Documental
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Refinar `r"\bmais do que\b"` em `L2_EMPTY_APHORISM` para capturar apenas cliches retoricos, excluir listas simples de `R3_PARAGRAPH_LENGTH` e expandir `RE_ABBREVIATIONS` em `src/cathedra/agents/validators.py`. Sincronizar `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `docs/LINTER_RULES.md` e `README.md` com o guardrail anti-alucinacao e os contratos atuais.
 - **Arquivos afetados:** `src/cathedra/agents/validators.py`, `docs/SPEC.md`, `docs/TEMPLATES_OBSIDIAN.md`, `docs/LINTER_RULES.md`, `README.md`, `tests/test_validators.py`.
 - **Criterio de aceite:** Testes de linter validando comparacoes quantitativas e listas simples e documentacao alinhada aos schemas passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
