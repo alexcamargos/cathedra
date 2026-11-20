@@ -1,6 +1,6 @@
 # AGENTS.md - Diretrizes Operacionais de Desenvolvimento
 
-Voce atua como engenheiro de software principal na construcao do projeto **MBA Wiki Engine**. Antes de implementar qualquer funcionalidade, leia `docs/SPEC.md` e os demais documentos em `docs/` para verificar os contratos de dados e a arquitetura do pipeline.
+Voce atua como engenheiro de software principal na construcao do projeto **Cathedra**. Antes de implementar qualquer funcionalidade, leia `docs/SPEC.md` e os demais documentos em `docs/` para verificar os contratos de dados e a arquitetura do pipeline.
 
 ## 1. Stack tecnologica e ambiente
 - **Linguagem:** Python 3.12+
@@ -12,16 +12,16 @@ Voce atua como engenheiro de software principal na construcao do projeto **MBA W
 ## 2. Comandos essenciais
 - Instalar dependencias: `uv sync`
 - Adicionar pacote: `uv add <pacote>`
-- Executar aplicacao via CLI: `uv run mba-wiki <comando>`
+- Executar aplicacao via CLI: `uv run cathedra <comando>`
 - Rodar bateria de testes: `uv run pytest -v`
 - Checar formatacao e lint: `uv run ruff check . && uv run ruff format --check .`
 - Checar tipagem estatica: `uv run mypy src/`
 
 ## 3. Estrutura do repositorio de codigo
-Mantenha a separacao estrita de responsabilidades dentro de `src/mba_wiki/`:
+Mantenha a separacao estrita de responsabilidades dentro de `src/cathedra/`:
 
 ```text
-src/mba_wiki/
+src/cathedra/
 ├── cli.py                 # Ponto de entrada CLI (Typer)
 ├── config.py              # Variaveis de ambiente e caminhos do Vault (pydantic-settings)
 ├── schemas.py             # Contratos de dados definidos em docs/SPEC.md
@@ -35,7 +35,7 @@ src/mba_wiki/
 └── exporters/
     └── obsidian_writer.py # Escrita idempotente de paginas Wiki, MOCs e Zettels
 4. Regras inegociaveis de engenharia
-Zero prompts hardcoded no Python: Todo prompt de sistema e instrucao de skill (fact-check e humanizer-ptbr) deve residir em src/mba_wiki/agents/prompts/*.md e ser carregado dinamicamente.
+Zero prompts hardcoded no Python: Todo prompt de sistema e instrucao de skill (fact-check e humanizer-ptbr) deve residir em src/cathedra/agents/prompts/*.md e ser carregado dinamicamente.
 
 Validacao hibrida no Humanizer: Nao confie apenas no prompt para cumprir a skill humanizer-ptbr. O modulo validators.py (especificado em docs/LINTER_RULES.md) deve inspecionar o texto retornado pela LLM via expressoes regulares para barrar travessoes explicativos (— ou –), paragrafos com mais de 4 frases e termos da lista negra antes de aprovar o estado.
 

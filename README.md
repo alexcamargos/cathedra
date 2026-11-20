@@ -1,4 +1,4 @@
-# MBA Wiki Engine
+# Cathedra
 
 Motor CLI em Python para geracao automatizada e idempotente de uma Wiki academica estruturada no Obsidian Vault, processando ementas oficiais, slides de aula e transcricoes literais de videoaulas.
 
@@ -59,7 +59,7 @@ O projeto realiza auto-provisao de dependencias nativas quando necessario:
 
 ## Configuracao
 
-As variaveis de ambiente podem ser definidas em um arquivo `.env` na raiz do projeto (consultar `src/mba_wiki/config.py`):
+As variaveis de ambiente podem ser definidas em um arquivo `.env` na raiz do projeto (consultar `src/cathedra/config.py`):
 
 Para o backend Gemini REST, configure `GEMINI_API_KEY` no ambiente ou no `.env`; a chave nao deve
 ser colocada no repositorio. Caso seja exposta, revogue-a ou rotacione-a no provedor.
@@ -73,14 +73,14 @@ LLM_MODEL_AUDITOR=gemini-2.5-pro
 
 ## Comandos da CLI
 
-A aplicacao disponibiliza a interface de comando via `uv run mba-wiki`:
+A aplicacao disponibiliza a interface de comando via `uv run cathedra`:
 
 ### 1. Inicializar Ementa do Curso
 
 Converte o documento textual ou resumo do programa do curso em `data/raw/ementa_estruturada.json` e inicializa o MOC no cofre:
 
 ```bash
-uv run mba-wiki init-syllabus caminho/para/programa_do_curso.txt
+uv run cathedra init-syllabus caminho/para/programa_do_curso.txt
 ```
 
 ### 2. Transcricao em Lote de Videoaulas
@@ -88,7 +88,7 @@ uv run mba-wiki init-syllabus caminho/para/programa_do_curso.txt
 Processa videos em MP4 organizados por pastas de disciplinas, gerando JSONs estruturados em `data/raw/transcripts/`:
 
 ```bash
-uv run mba-wiki transcribe-batch caminho/para/videos/ --model large-v3
+uv run cathedra transcribe-batch caminho/para/videos/ --model large-v3
 ```
 
 - Pula um video apenas quando o checkpoint confere com o hash do arquivo e a configuracao de transcricao.
@@ -102,7 +102,7 @@ uv run mba-wiki transcribe-batch caminho/para/videos/ --model large-v3
 Executa o pipeline completo para uma aula a partir do slide correspondente:
 
 ```bash
-uv run mba-wiki build-lesson caminho/para/slide.pdf --discipline lideranca-estrategica --lesson 1
+uv run cathedra build-lesson caminho/para/slide.pdf --discipline lideranca-estrategica --lesson 1
 ```
 
 Opcoes disponiveis:
@@ -113,7 +113,7 @@ Opcoes disponiveis:
 Para processar todas as aulas de uma disciplina em ordem numerica (ou toda a ementa em sequencia com `--all`), utilize:
 
 ```bash
-uv run mba-wiki build-discipline fundamentos-de-estatistica
+uv run cathedra build-discipline fundamentos-de-estatistica --allow-pending-review
 ```
 
 Um caminho explicito deve existir e a disciplina do JSON deve corresponder a aula; se o JSON
@@ -127,7 +127,7 @@ o comando informa que seguira sem transcricao.
 O comando `transcribe-batch` nao infere o numero da aula pelo nome do video; seus JSONs sem
 `lesson_number` devem ser informados explicitamente ate que esse campo seja preenchido com um numero
 confirmado. Para preencher `discipline_slug` e `lesson_number` em lote a partir da ementa e dos
-prefixos numericos sem retranscrever os videos, use `uv run mba-wiki bind-transcripts --dry-run` e
+prefixos numericos sem retranscrever os videos, use `uv run cathedra bind-transcripts --dry-run` e
 depois execute sem `--dry-run`. O relatorio de auditoria registra o caminho absoluto do JSON, o nome do video original
 e se a escolha foi explicita, automatica ou em memoria.
 
@@ -154,7 +154,7 @@ localizacao literal do trecho citado, mas nao garante sua pertinencia ou a corre
 Reindexa todas as notas de tensoes dialeticas registradas no cofre e atualiza o indice geral:
 
 ```bash
-uv run mba-wiki sync-tensions
+uv run cathedra sync-tensions
 ```
 
 ## Qualidade e Testes
