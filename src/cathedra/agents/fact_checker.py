@@ -781,16 +781,23 @@ def audit_humanized_invariance(
     tensions: list[DialecticalTension] | None = None,
     prompt: str | None = None,
     allow_pending_review: bool = False,
+    audited_zettels: list[AtomicZettel] | None = None,
 ) -> FactCheckResult:
     """Verifies that post-humanizer text preserves factual invariance against audited prose.
+
+    When audited_zettels is provided, compares only zettels whose content actually changed
+    during humanization by sending explicit before/after pairs per slug, avoiding redundant
+    re-audits of untouched zettels and tensions.
 
     Args:
         audited_markdown: Previously verified and remediated lesson prose.
         humanized_markdown: Stylistically rewritten prose produced by humanize_node.
         client: Structured LLM client for invariance verification.
-        zettels: Validated atomic zettels to include in final invariance check.
-        tensions: Validated dialectical tensions to include in final invariance check.
+        zettels: Post-humanizer atomic zettels to verify.
+        tensions: Validated dialectical tensions carried forward unchanged.
         prompt: Optional system prompt override.
+        allow_pending_review: Whether non-critical invariance findings may pass with flag.
+        audited_zettels: Optional pre-humanizer zettel baseline for before/after comparison.
 
     Returns:
         FactCheckResult recording invariance audit items and pass/fail status.
@@ -804,13 +811,26 @@ def audit_humanized_invariance(
         f"## Texto Humanizado (Alvo da Verificação)\n\n```markdown\n{humanized_markdown}\n```",
     ]
     if zettels:
-        z_lines = [f"- [{z.slug}] {z.title}: {z.content_markdown}" for z in zettels]
-        sections.append("## Zettels Finais\n" + "\n".join(z_lines))
-    if tensions:
-        t_lines = [
-            f"- [{t.slug}] {t.title}: {t.pole_a_thesis} vs {t.pole_b_thesis}" for t in tensions
-        ]
-        sections.append("## Tensões Finais\n" + "\n".join(t_lines))
+        if audited_zettels is not None:
+            baseline_by_slug = {z.slug: z for z in audited_zettels}
+            changed_blocks: list[str] = []
+            for z in zettels:
+                before = baseline_by_slug.get(z.slug)
+                before_text = before.content_markdown if before is not None else ""
+                if before is None or before_text != z.content_markdown:
+                    changed_blocks.append(
+                        f"### [{z.slug}] {z.title}\n"
+                        f"**Auditado (Referência):**\n{before_text}\n\n"
+                        f"**Humanizado (Alvo):**\n{z.content_markdown}"
+                    )
+            if changed_blocks:
+                sections.append(
+                    "## Zettels Modificados pelo Humanizador (Antes vs. Depois)\n\n"
+                    + "\n\n".join(changed_blocks)
+                )
+        else:
+            z_lines = [f"- [{z.slug}] {z.title}: {z.content_markdown}" for z in zettels]
+            sections.append("## Zettels Finais\n" + "\n".join(z_lines))
 
     response: AuditClaimsResponse = client.generate_structured(
         system_prompt=system_prompt,
