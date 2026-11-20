@@ -559,3 +559,26 @@ def test_gemini_rest_client_records_usage_metadata(
     assert entry["candidates_tokens"] == 350
     assert entry["thoughts_tokens"] == 150
     assert entry["total_tokens"] == 1700
+
+
+def test_extract_json_payload_handles_stray_braces_around_json() -> None:
+    """Tests that extract_json_payload decodes balanced JSON despite surrounding braces.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from cathedra.agents.llm_client import extract_json_payload
+
+    noisy_output = (
+        "[INFO {worker}] Iniciando resposta...\n"
+        '{"topic": "Estatística", "score": 9.5}\n'
+        "Observação final com chaves {extra} e \\frac{a}{b}."
+    )
+    extracted = extract_json_payload(noisy_output)
+    assert json.loads(extracted) == {"topic": "Estatística", "score": 9.5}
