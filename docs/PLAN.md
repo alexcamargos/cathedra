@@ -308,7 +308,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes cobrindo Zettels com `\n\n` literal e listas `R4_AI_BULLET`, faixas numericas `2020–2024`, comandos LaTeX `\nu`/`\neq` e blocos Python indentados passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 49: Blindagem da Camada de Transporte LLM (GeminiRESTClient e extract_json_payload)
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Atualizar `GeminiRESTClient` em `src/cathedra/agents/llm_client.py` para filtrar partes `thought: true` e concatenar todas as partes de resposta `text`, validar `finishReason` (rejeitando `MAX_TOKENS`, `SAFETY`, `RECITATION`), reutilizar `_build_generation_config` em `generate_text` para paridade de `thinkingConfig` e substituir o corte ingenuo em `extract_json_payload` por decodificacao balanceada com `json.JSONDecoder().raw_decode`.
 - **Arquivos afetados:** `src/cathedra/agents/llm_client.py`, `tests/test_llm_client.py`, `tests/test_agy_client.py`.
 - **Criterio de aceite:** Testes unitarios cobrindo respostas multipart com `thought: true`, erro explicito em `MAX_TOKENS`/`SAFETY`, envio de `thinkingConfig` em `generate_text` e extracao balanceada de JSON passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
