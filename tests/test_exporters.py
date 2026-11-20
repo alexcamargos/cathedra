@@ -547,8 +547,8 @@ def test_write_lesson_page_creates_and_preserves_personal_notes(
     reprocessed_content = reprocessed_path.read_text(encoding="utf-8")
 
     assert "# Texto Atualizado e Expandido" in reprocessed_content
-    # Frontmatter is outside the managed block and must remain untouched.
-    assert "removed_claims: 0" in reprocessed_content
+    # Machine-managed audit frontmatter updates selectively while preserving manual notes.
+    assert "removed_claims: 2" in reprocessed_content
     assert "Anotação pessoal do aluno feita em sala." in reprocessed_content
 
 
@@ -1408,3 +1408,108 @@ def test_write_lesson_page_renders_pending_review_callout_and_frontmatter(tmp_pa
     assert "fact_check_status: pending_review" in content
     assert "> [!warning] Revisão Factual Pendente" in content
     assert "`C01` (verified): Afirmação sem localizador literal." in content
+
+
+def test_write_lesson_page_updates_managed_frontmatter_and_exports_cross_links(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Reprocessing updates managed audit frontmatter keys and renders cross_links."""
+    from cathedra.schemas import CrossDisciplineLink
+
+    initial = sample_lesson_output.model_copy(
+        update={
+            "has_pending_review": True,
+            "removed_unsupported_claims": 2,
+            "cross_links": [
+                CrossDisciplineLink(
+                    target_discipline_slug="estrategia",
+                    target_topic="Vantagem Competitiva",
+                    connection_type="synergy",
+                    description="VPL positivo sustenta investimentos de diferenciação.",
+                )
+            ],
+        }
+    )
+    lesson_path = write_lesson_page(vault_root=tmp_path, output=initial)
+    first_content = lesson_path.read_text(encoding="utf-8")
+    assert "fact_check_status: pending_review" in first_content
+    assert "## Conexoes Transversais no Curriculo" in first_content
+    expected_link = "[[01_Wiki_Disciplinas/estrategia/_Indice_Materia|Vantagem Competitiva]]"
+    assert expected_link in first_content
+
+    # Inject a custom user YAML key and reprocess as clean verified
+    lesson_path.write_text(
+        first_content.replace("tags:\n", "owner: meu-estudo\ntags:\n"),
+        encoding="utf-8",
+    )
+    resolved = initial.model_copy(
+        update={
+            "has_pending_review": False,
+            "removed_unsupported_claims": 0,
+            "processed_date": date(2026, 11, 21),
+        }
+    )
+    write_lesson_page(vault_root=tmp_path, output=resolved)
+    updated = lesson_path.read_text(encoding="utf-8")
+    assert "fact_check_status: verified" in updated
+    assert "removed_claims: 0" in updated
+    assert "processed_date: 2026-11-21" in updated
+    assert "owner: meu-estudo" in updated
+
+
+def test_write_atomic_zettel_force_repairs_legacy_corrupted_body_preserving_links(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Running write_atomic_zettel with force=True repairs legacy body without losing links."""
+    zettel_dir = tmp_path / "02_Zettelkasten"
+    zettel_dir.mkdir(parents=True)
+    zettel_path = zettel_dir / "valor-presente-liquido.md"
+    zettel_path.write_text(
+        "---\n"
+        "type: zettel\n"
+        'slug: "valor-presente-liquido"\n'
+        'title: "Valor Presente Líquido"\n'
+        "custom: nota-minha\n"
+        "tags:\n"
+        "  - financas\n"
+        "---\n\n"
+        "# Valor Presente Líquido\n\n"
+        "Texto legado corrompido.\\n\\n- **Item:** quebrado.\n\n"
+        "## Conexoes Diretas\n"
+        "- [[taxa-interna-retorno]]\n\n"
+        "## Referencias no Curso\n"
+        "<!-- AUTO-BACKLINKS:START -->\n"
+        "- [[Aula_01_criterios-de-decisao]] (Finanças Corporativas)\n"
+        "<!-- AUTO-BACKLINKS:END -->\n",
+        encoding="utf-8",
+    )
+
+    repaired_zettel = sample_lesson_output.extracted_zettels[0].model_copy(
+        update={"content_markdown": "Texto limpo e corrigido em prosa contínua."}
+    )
+    write_atomic_zettel(
+        vault_root=tmp_path,
+        zettel=repaired_zettel,
+        output=sample_lesson_output,
+        force=True,
+    )
+    updated = zettel_path.read_text(encoding="utf-8")
+    assert "Texto limpo e corrigido em prosa contínua." in updated
+    assert "Texto legado corrompido" not in updated
+    assert "<!-- AUTO-CONTENT:START -->" in updated
+    assert "custom: nota-minha" in updated
+    assert "- [[taxa-interna-retorno]]" in updated
+    assert "- [[Aula_01_criterios-de-decisao]] (Finanças Corporativas)" in updated
+
+
+def test_write_audit_report_persists_has_pending_review(
+    tmp_path: Path,
+    sample_lesson_output: WikiLessonOutput,
+) -> None:
+    """Persisted LessonAuditReport JSON records has_pending_review faithfully."""
+    pending_output = sample_lesson_output.model_copy(update={"has_pending_review": True})
+    report_path = write_audit_report(vault_root=tmp_path, output=pending_output)
+    restored = LessonAuditReport.model_validate_json(report_path.read_text(encoding="utf-8"))
+    assert restored.has_pending_review is True

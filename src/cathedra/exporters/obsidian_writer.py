@@ -15,6 +15,7 @@ from pathlib import Path
 
 from cathedra.schemas import (
     AtomicZettel,
+    CrossDisciplineLink,
     DialecticalTension,
     LessonAuditReport,
     LessonPipelineState,
@@ -216,6 +217,77 @@ def format_zettels_section(zettels: list[AtomicZettel]) -> str:
     return "\n".join(lines)
 
 
+def format_cross_links_section(cross_links: list[CrossDisciplineLink]) -> str:
+    """Formats cross-disciplinary curriculum links for inclusion in a lesson page.
+
+    Args:
+        cross_links: List of CrossDisciplineLink models extracted during drafting.
+
+    Returns:
+        Formatted Markdown section with discipline index links, or empty string if none.
+
+    Raises:
+        None.
+    """
+    if not cross_links:
+        return ""
+    lines = ["## Conexoes Transversais no Curriculo"]
+    for link in cross_links:
+        lines.append(
+            f"- [[01_Wiki_Disciplinas/{link.target_discipline_slug}/_Indice_Materia|"
+            f"{link.target_topic}]] (`{link.connection_type}`): {link.description}"
+        )
+    return "\n".join(lines)
+
+
+def _update_lesson_frontmatter_audit_fields(
+    content: str,
+    output: WikiLessonOutput,
+    fact_check_status: str,
+) -> str:
+    """Selectively updates machine-managed audit keys in an existing lesson YAML frontmatter.
+
+    Preserves custom user YAML keys, tag lists, line endings, and all content outside
+    the frontmatter block.
+
+    Args:
+        content: Existing markdown file content.
+        output: Updated WikiLessonOutput carrying current audit metadata.
+        fact_check_status: Current status label ('verified' or 'pending_review').
+
+    Returns:
+        Markdown content with updated machine-managed frontmatter fields.
+
+    Raises:
+        None.
+    """
+    fm_match = re.match(r"^(---\r?\n)(.*?)(\r?\n---\r?\n)", content, re.DOTALL)
+    if not fm_match:
+        return content
+
+    newline = "\r\n" if "\r\n" in fm_match.group(1) else "\n"
+    fm_body = fm_match.group(2)
+    managed_updates: list[tuple[str, str]] = [
+        ("processed_date", output.processed_date.isoformat()),
+        ("fact_check_passed", str(output.fact_check_passed).lower()),
+        ("fact_check_status", fact_check_status),
+        ("removed_claims", str(output.removed_unsupported_claims)),
+    ]
+
+    for key, value in managed_updates:
+        key_pattern = re.compile(rf"(?m)^({re.escape(key)}:[ \t]*)([^\r\n]*)$")
+        if key_pattern.search(fm_body):
+            fm_body = key_pattern.sub(rf"\g<1>{value}", fm_body, count=1)
+        elif key == "fact_check_status":
+            passed_pattern = re.compile(r"(?m)^(fact_check_passed:[^\r\n]*)$")
+            if passed_pattern.search(fm_body):
+                fm_body = passed_pattern.sub(
+                    rf"\1{newline}fact_check_status: {value}", fm_body, count=1
+                )
+
+    return f"{fm_match.group(1)}{fm_body}{fm_match.group(3)}{content[fm_match.end() :]}"
+
+
 def format_pending_review_callout(output: WikiLessonOutput) -> str:
     """Formats an Obsidian warning callout when a lesson has pending factual review items."""
     if not output.has_pending_review:
@@ -265,12 +337,15 @@ def write_lesson_page(
     lesson_path = discipline_dir / filename
 
     zettel_block = format_zettels_section(output.extracted_zettels)
+    cross_links_block = format_cross_links_section(output.cross_links)
     pending_callout = format_pending_review_callout(output)
     auto_body = output.body_markdown.strip()
     if pending_callout:
         auto_body = f"{pending_callout}\n\n{auto_body}"
     if zettel_block:
         auto_body = f"{auto_body}\n\n{zettel_block}"
+    if cross_links_block:
+        auto_body = f"{auto_body}\n\n{cross_links_block}"
 
     fact_check_status = "pending_review" if output.has_pending_review else "verified"
 
@@ -328,6 +403,9 @@ def write_lesson_page(
         return lesson_path
 
     before_block = existing_content[: start_idx + len(AUTO_CONTENT_START)]
+    before_block = _update_lesson_frontmatter_audit_fields(
+        before_block, output=output, fact_check_status=fact_check_status
+    )
     after_block = existing_content[end_idx:]
     updated_content = f"{before_block}\n{auto_body}\n{after_block}"
     _write_text_atomically(lesson_path, updated_content)
@@ -377,7 +455,9 @@ def write_atomic_zettel(
             f"{tag_lines}\n"
             "---\n\n"
             f"# {zettel.title}\n\n"
-            f"{zettel.content_markdown}\n\n"
+            f"{AUTO_CONTENT_START}\n"
+            f"{zettel.content_markdown}\n"
+            f"{AUTO_CONTENT_END}\n\n"
             "## Conexoes Diretas\n"
             f"{direct_link_lines}\n\n"
             "## Referencias no Curso\n"
@@ -389,6 +469,9 @@ def write_atomic_zettel(
         return zettel_path
 
     existing_content = zettel_path.read_text(encoding="utf-8")
+    had_backlinks = (
+        AUTO_BACKLINKS_START in existing_content and AUTO_BACKLINKS_END in existing_content
+    )
     existing_content = _ensure_managed_block(
         existing_content,
         AUTO_BACKLINKS_START,
@@ -416,6 +499,45 @@ def write_atomic_zettel(
                 prefix = "" if body_and_links[:insert_at].endswith("\n") else "\n"
                 addition = prefix + "".join(f"  - {tag}\n" for tag in missing_tags)
                 body_and_links = body_and_links[:insert_at] + addition + body_and_links[insert_at:]
+
+    if force:
+        c_start_count = body_and_links.count(AUTO_CONTENT_START)
+        c_end_count = body_and_links.count(AUTO_CONTENT_END)
+        if c_start_count > 1 or c_end_count > 1:
+            raise ValueError(f"Delimiters are duplicated or out of order in {zettel_path}")
+        if c_start_count == c_end_count == 1:
+            c_start = body_and_links.index(AUTO_CONTENT_START)
+            c_end = body_and_links.index(AUTO_CONTENT_END)
+            if c_start > c_end:
+                raise ValueError(f"Delimiters are duplicated or out of order in {zettel_path}")
+            body_and_links = (
+                body_and_links[: c_start + len(AUTO_CONTENT_START)]
+                + f"\n{zettel.content_markdown}\n"
+                + body_and_links[c_end:]
+            )
+        elif (
+            c_start_count == 0
+            and c_end_count == 0
+            and had_backlinks
+            and fm_match is not None
+            and re.search(r'(?m)^type:\s*"?zettel"?\s*$', fm_match.group(1))
+        ):
+            legacy_body_match = re.search(
+                r"(^# [^\r\n]+\r?\n\r?\n)([\s\S]*?)(\r?\n\r?\n## Conexoes Diretas)",
+                body_and_links,
+                re.MULTILINE,
+            )
+            if legacy_body_match:
+                replacement = (
+                    f"{legacy_body_match.group(1)}"
+                    f"{AUTO_CONTENT_START}\n{zettel.content_markdown}\n{AUTO_CONTENT_END}"
+                    f"{legacy_body_match.group(3)}"
+                )
+                body_and_links = (
+                    body_and_links[: legacy_body_match.start()]
+                    + replacement
+                    + body_and_links[legacy_body_match.end() :]
+                )
 
     # Merge related_links into ## Conexoes Diretas
     conexoes_match = re.search(
@@ -476,6 +598,7 @@ def write_blocked_audit_report(vault_root: Path, state: LessonPipelineState) -> 
         lesson_title=state.lesson_title,
         processed_date=date.today(),
         fact_check_passed=False,
+        has_pending_review=state.has_pending_review,
         total_claims_audited=len(state.audit_items),
         removed_unsupported_claims=state.removed_unsupported_claims,
         audit_items=state.audit_items,
@@ -518,6 +641,7 @@ def write_audit_report(
         lesson_title=output.lesson_title,
         processed_date=output.processed_date,
         fact_check_passed=output.fact_check_passed,
+        has_pending_review=output.has_pending_review,
         total_claims_audited=len(output.audit_items),
         removed_unsupported_claims=output.removed_unsupported_claims,
         audit_items=output.audit_items,
@@ -956,6 +1080,7 @@ __all__ = [
     "AUTO_ZETTELS_START",
     "VaultExportResult",
     "export_lesson_to_vault",
+    "format_cross_links_section",
     "format_zettels_section",
     "write_atomic_zettel",
     "write_audit_report",
