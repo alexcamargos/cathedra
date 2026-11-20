@@ -302,7 +302,7 @@ Este arquivo controla o estado atual do desenvolvimento. O agente deve executar 
 - **Criterio de aceite:** Testes unitarios validando schema enxuto de guardrail, passada unica sem loop de reparo, bloqueio estrito de `S1`/`S5` criticos inclusive orfaos e em Zettels/Tensoes, ausencia de `bibliography` no prompt do auditor e aprovacao de explicacoes didaticas sem bloqueio por `S2`/`S6` leve, passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
 
 ## Etapa 48: Normalizacao de Quebras de Linha Literais e Mascaramento de Regioes Protegidas
-- **Status:** `[ ]`
+- **Status:** `[x]`
 - **Escopo:** Normalizar sequencias literais `\n` fora de blocos de codigo e comandos LaTeX na deserializacao de `DraftResult` em `src/cathedra/schemas.py`, adicionar regra bloqueante `R5_LITERAL_NEWLINE` em `src/cathedra/agents/validators.py`, mascarar codigo/LaTeX/faixas numericas em `sanitize_markdown_heuristics` (`src/cathedra/agents/humanizer.py`) e preservar indentacao de blocos de codigo e listas na limpeza pos-remediacao em `src/cathedra/agents/fact_checker.py`.
 - **Arquivos afetados:** `src/cathedra/schemas.py`, `src/cathedra/agents/validators.py`, `src/cathedra/agents/humanizer.py`, `src/cathedra/agents/fact_checker.py`, `tests/test_schemas.py`, `tests/test_validators.py`, `tests/test_humanizer.py`, `tests/test_fact_checker.py`.
 - **Criterio de aceite:** Testes cobrindo Zettels com `\n\n` literal e listas `R4_AI_BULLET`, faixas numericas `2020–2024`, comandos LaTeX `\nu`/`\neq` e blocos Python indentados passando com `uv run pytest -v`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/`.
