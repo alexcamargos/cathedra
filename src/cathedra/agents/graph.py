@@ -205,9 +205,14 @@ def finalize_output_node(
         Updated LessonPipelineState with populated output attribute.
 
     Raises:
-        None.
+        ValueError: If neither humanized_markdown nor audited_markdown is available.
     """
-    final_body = state.humanized_markdown or state.audited_markdown or state.raw_draft or ""
+    if state.humanized_markdown is not None:
+        final_body = state.humanized_markdown
+    elif state.audited_markdown is not None:
+        final_body = state.audited_markdown
+    else:
+        raise ValueError("Cannot finalize WikiLessonOutput without audited or humanized markdown.")
 
     output = WikiLessonOutput(
         discipline_slug=state.discipline_slug,
@@ -275,7 +280,8 @@ def execute_pipeline(
     if not state.fact_check_passed:
         raise FactCheckBlockedError(state)
 
-    # 3. Polimento Estilístico com Validação e Retentativa
+    # 3. Polimento Estilístico com Validação e Retentativa (captura baseline pré-humanizador)
+    pre_humanizer_zettels = [zettel.model_copy(deep=True) for zettel in state.extracted_zettels]
     state = humanize_node(state=state, client=client, max_attempts=humanizer_max_attempts)
 
     # 4. Audit the exact post-humanizer artifacts via invariance check against audited prose.
@@ -287,6 +293,7 @@ def execute_pipeline(
         zettels=[zettel.model_copy(deep=True) for zettel in state.extracted_zettels],
         tensions=[tension.model_copy(deep=True) for tension in state.detected_tensions],
         allow_pending_review=allow_pending_review,
+        audited_zettels=pre_humanizer_zettels,
     )
     state.audit_items.extend(
         item.model_copy(update={"audit_stage": "final"}) for item in final_audit.audit_items

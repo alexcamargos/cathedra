@@ -883,3 +883,32 @@ def test_execute_pipeline_final_stage_uses_invariance_without_transcript_payload
     final_call = fake_llm_client.calls[-1]
     assert "Texto Auditado (Referência Aprovada)" in final_call.user_prompt
     assert "marcador-unico-transcricao" not in final_call.user_prompt
+
+
+def test_finalize_output_node_rejects_missing_audited_and_humanized_markdown(
+    sample_syllabus_module: SyllabusModule,
+) -> None:
+    """Tests that finalize_output_node never falls back silently to unaudited raw_draft.
+
+    Args:
+        sample_syllabus_module: Sample syllabus module fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from cathedra.agents.graph import finalize_output_node
+
+    state = create_initial_state(
+        slides=[SlideChunk(slide_number=1, title="VPL", raw_text="VPL > 0")],
+        syllabus=sample_syllabus_module,
+        lesson_number=1,
+        lesson_title="VPL",
+        source_slide_filename="aula.pdf",
+    )
+    state.raw_draft = "Rascunho não auditado."
+
+    with pytest.raises(ValueError, match="without audited or humanized markdown"):
+        finalize_output_node(state)
