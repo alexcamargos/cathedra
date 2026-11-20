@@ -9,8 +9,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mba_wiki.schemas import StructuredSyllabus, VideoTranscript
-from mba_wiki.transcription.batch_runner import _slugify, _write_transcript_atomically
+from cathedra.schemas import StructuredSyllabus, VideoTranscript
+from cathedra.transcription.batch_runner import _slugify, _write_transcript_atomically
 
 _LESSON_PREFIX_RE = re.compile(r"^(\d+)(?:[-_\s]|$)")
 _SUPPORTED_SLIDE_EXTENSIONS = {".pdf", ".pptx"}

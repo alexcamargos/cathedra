@@ -20,13 +20,13 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
 
-from mba_wiki.schemas import TranscriptCheckpoint, VideoTranscript
-from mba_wiki.transcription.audio_extractor import extracted_audio
-from mba_wiki.transcription.telemetry import (
+from cathedra.schemas import TranscriptCheckpoint, VideoTranscript
+from cathedra.transcription.audio_extractor import extracted_audio
+from cathedra.transcription.telemetry import (
     TranscriptionLogger,
     TranscriptionTelemetryItem,
 )
-from mba_wiki.transcription.transcriber import (
+from cathedra.transcription.transcriber import (
     TRANSCRIPTION_BEAM_SIZE,
     TRANSCRIPTION_LANGUAGE,
     TRANSCRIPTION_PIPELINE_REVISION,

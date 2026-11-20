@@ -9,12 +9,12 @@ from pathlib import Path
 
 from faster_whisper import WhisperModel
 
-from mba_wiki.schemas import TranscriptSegment, VideoTranscript
-from mba_wiki.transcription.bootstrap import (
+from cathedra.schemas import TranscriptSegment, VideoTranscript
+from cathedra.transcription.bootstrap import (
     prepare_runtime_environment,
     register_windows_dll_directories,
 )
-from mba_wiki.transcription.cleaner import clean_segments, clean_speech_text
+from cathedra.transcription.cleaner import clean_segments, clean_speech_text
 
 TRANSCRIPTION_LANGUAGE = "pt"
 TRANSCRIPTION_VAD_FILTER = True

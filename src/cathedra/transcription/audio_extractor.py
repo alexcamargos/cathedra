@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from mba_wiki.transcription.bootstrap import ensure_ffmpeg
+from cathedra.transcription.bootstrap import ensure_ffmpeg
 
 
 def extract_audio_to_file(video_path: Path | str, output_path: Path | str) -> Path:

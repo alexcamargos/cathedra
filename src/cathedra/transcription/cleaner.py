@@ -6,7 +6,7 @@ and stuttered repetitions while strictly preserving technical vocabulary and for
 
 import re
 
-from mba_wiki.schemas import TranscriptSegment
+from cathedra.schemas import TranscriptSegment
 
 # Pattern matching repeated short grammatical tokens (articles, prepositions, conjunctions)
 _REPEATED_WORDS_REGEX = re.compile(
